@@ -328,6 +328,9 @@ impl App {
                         SettingsAction::SaveSwitchAsciiInputSourceInPrefix(enabled) => {
                             self.save_switch_ascii_input_source_in_prefix(enabled)
                         }
+                        SettingsAction::SavePaneBorder(target, color) => {
+                            self.save_pane_border(target, color)
+                        }
                         SettingsAction::InstallRecommendedIntegrations => {
                             self.install_recommended_integrations()
                         }

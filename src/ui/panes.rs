@@ -17,6 +17,64 @@ use crate::layout::PaneInfo;
 use crate::popup_size::resolve_popup_geometry;
 use crate::terminal::{TerminalRuntime, TerminalRuntimeRegistry};
 
+/// The agent state tint for a pane, or `None` when state should not color it.
+///
+/// `Attention` deliberately tints only the states that want a human. If every
+/// pane is tinted all the time the color stops carrying information, which is
+/// the opposite of the point.
+fn pane_state_tint(
+    app: &AppState,
+    ws: &crate::workspace::Workspace,
+    pane_id: crate::layout::PaneId,
+) -> Option<Color> {
+    use crate::config::PaneBorderAgentState;
+    use crate::detect::AgentState;
+
+    if app.pane_border_agent_state == PaneBorderAgentState::Off {
+        return None;
+    }
+
+    let pane = ws.pane_state(pane_id)?;
+    let terminal = app.terminals.get(&pane.attached_terminal_id)?;
+    let (state, seen) = (terminal.state, pane.seen);
+
+    let noteworthy = match (state, seen) {
+        // Blocked wants input; finished-but-unseen wants a look.
+        (AgentState::Blocked, _) | (AgentState::Idle, false) => true,
+        _ => false,
+    };
+    if app.pane_border_agent_state == PaneBorderAgentState::Attention && !noteworthy {
+        return None;
+    }
+    if matches!(state, AgentState::Unknown) {
+        return None;
+    }
+    Some(super::status::state_label_color(state, seen, &app.palette))
+}
+
+/// Resolve the border color for one pane.
+///
+/// Precedence: a manual color the user set on this pane, then the agent state
+/// tint, then the configured focused/unfocused colors, then the theme.
+pub(crate) fn resolved_pane_border_color(
+    app: &AppState,
+    ws: &crate::workspace::Workspace,
+    pane_id: crate::layout::PaneId,
+    focused: bool,
+) -> Color {
+    if let Some(color) = app.pane_border_overrides.get(&pane_id) {
+        return *color;
+    }
+    if let Some(tint) = pane_state_tint(app, ws, pane_id) {
+        return tint;
+    }
+    if focused {
+        app.pane_border_focused.unwrap_or(app.palette.accent)
+    } else {
+        app.pane_border_unfocused.unwrap_or(app.palette.overlay0)
+    }
+}
+
 pub(crate) fn pane_is_scrolled_back(rt: &TerminalRuntime) -> bool {
     rt.scroll_metrics()
         .is_some_and(|metrics| metrics.offset_from_bottom > 0)
@@ -463,20 +521,31 @@ fn render_pane_borders(
         {
             continue;
         }
-        let focused = pane_infos
-            .iter()
-            .any(|info| info.is_focused && line_touches_pane(x, y, info, app.pane_gaps));
         let symbol = line_cell_symbol(line);
         if symbol.is_empty() {
             continue;
         }
         let cell = &mut buf[(x, y)];
         cell.set_symbol(symbol);
-        let color = if focused {
-            app.pane_border_focused.unwrap_or(app.palette.accent)
-        } else {
-            app.pane_border_unfocused.unwrap_or(app.palette.overlay0)
-        };
+        // A border line is shared by the panes on either side of it, so pick a
+        // winner: the focused pane first (it owns the focus cue), otherwise a
+        // neighbour that has something worth showing, otherwise the default.
+        let mut touching = pane_infos
+            .iter()
+            .filter(|info| line_touches_pane(x, y, info, app.pane_gaps));
+        let color = touching
+            .clone()
+            .find(|info| info.is_focused)
+            .map(|info| resolved_pane_border_color(app, ws, info.id, true))
+            .or_else(|| {
+                touching
+                    .find(|info| {
+                        app.pane_border_overrides.contains_key(&info.id)
+                            || pane_state_tint(app, ws, info.id).is_some()
+                    })
+                    .map(|info| resolved_pane_border_color(app, ws, info.id, false))
+            })
+            .unwrap_or_else(|| app.pane_border_unfocused.unwrap_or(app.palette.overlay0));
         cell.set_style(Style::default().fg(color));
     }
 
@@ -639,11 +708,7 @@ fn render_pane_border_titles(
         if start_x >= end_x {
             continue;
         }
-        let color = if info.is_focused {
-            app.pane_border_focused.unwrap_or(app.palette.accent)
-        } else {
-            app.pane_border_unfocused.unwrap_or(app.palette.overlay0)
-        };
+        let color = resolved_pane_border_color(app, ws, info.id, info.is_focused);
         let mut style = Style::default().fg(color);
         if info.is_focused {
             style = style.add_modifier(Modifier::BOLD);
@@ -1002,6 +1067,119 @@ mod tests {
 
         assert_eq!(title, " 1 模块… ");
         assert!(display_width(title.as_str()) <= 10);
+    }
+
+    /// Build an app + workspace whose single pane has the given agent state.
+    fn app_with_pane_state(
+        state: crate::detect::AgentState,
+        seen: bool,
+    ) -> (AppState, Workspace, PaneId) {
+        let mut app = AppState::test_new();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        let terminal_id = ws.tabs[0].panes[&pane_id].attached_terminal_id.clone();
+        let mut terminal_state = TerminalState::new(terminal_id.clone(), "/tmp".into());
+        terminal_state.state = state;
+        app.terminals.insert(terminal_id, terminal_state);
+        if let Some(pane) = ws.tabs[0].panes.get_mut(&pane_id) {
+            pane.seen = seen;
+        }
+        (app, ws, pane_id)
+    }
+
+    #[test]
+    fn manual_border_override_beats_state_tint_and_focus_color() {
+        use crate::detect::AgentState;
+
+        // A blocked pane would normally tint red; an explicit color wins.
+        let (mut app, ws, pane_id) = app_with_pane_state(AgentState::Blocked, true);
+        let gold = crate::config::parse_color("#ffd700");
+        app.pane_border_overrides.insert(pane_id, gold);
+
+        assert_eq!(resolved_pane_border_color(&app, &ws, pane_id, false), gold);
+        assert_eq!(
+            resolved_pane_border_color(&app, &ws, pane_id, true),
+            gold,
+            "an explicit pane color also wins over the focus color"
+        );
+
+        // Clearing it falls back to the state tint.
+        app.pane_border_overrides.remove(&pane_id);
+        assert_eq!(
+            resolved_pane_border_color(&app, &ws, pane_id, false),
+            app.palette.red
+        );
+    }
+
+    #[test]
+    fn attention_mode_tints_only_panes_that_want_a_human() {
+        use crate::config::PaneBorderAgentState;
+        use crate::detect::AgentState;
+
+        // Blocked and finished-but-unseen are noteworthy.
+        for (state, seen, expected) in [
+            (AgentState::Blocked, true, Some(())),
+            (AgentState::Idle, false, Some(())),
+            // A working or already-seen pane stays quiet, so color keeps meaning.
+            (AgentState::Working, true, None),
+            (AgentState::Idle, true, None),
+            (AgentState::Unknown, true, None),
+        ] {
+            let (mut app, ws, pane_id) = app_with_pane_state(state, seen);
+            app.pane_border_agent_state = PaneBorderAgentState::Attention;
+            let tinted = pane_state_tint(&app, &ws, pane_id).is_some();
+            assert_eq!(
+                tinted,
+                expected.is_some(),
+                "state {state:?} seen={seen} tinted unexpectedly in attention mode"
+            );
+        }
+    }
+
+    #[test]
+    fn always_mode_tints_working_but_off_mode_never_does() {
+        use crate::config::PaneBorderAgentState;
+        use crate::detect::AgentState;
+
+        let (mut app, ws, pane_id) = app_with_pane_state(AgentState::Working, true);
+
+        app.pane_border_agent_state = PaneBorderAgentState::Always;
+        assert_eq!(
+            pane_state_tint(&app, &ws, pane_id),
+            Some(app.palette.yellow),
+            "always mode matches the sidebar's working color"
+        );
+
+        app.pane_border_agent_state = PaneBorderAgentState::Off;
+        assert_eq!(pane_state_tint(&app, &ws, pane_id), None);
+        // With tinting off the pane falls back to the configured focus colors.
+        let blue = crate::config::parse_color("#0000ff");
+        app.pane_border_focused = Some(blue);
+        assert_eq!(resolved_pane_border_color(&app, &ws, pane_id, true), blue);
+    }
+
+    #[test]
+    fn border_tint_matches_the_sidebar_icon_color_for_each_state() {
+        use crate::config::PaneBorderAgentState;
+        use crate::detect::AgentState;
+
+        // The whole point of reusing state_label_color: borders and sidebar
+        // icons must never drift apart.
+        for (state, seen) in [
+            (AgentState::Blocked, true),
+            (AgentState::Working, true),
+            (AgentState::Idle, false),
+            (AgentState::Idle, true),
+        ] {
+            let (mut app, ws, pane_id) = app_with_pane_state(state, seen);
+            app.pane_border_agent_state = PaneBorderAgentState::Always;
+            let (_, icon_style) = crate::ui::status::agent_icon(state, seen, 0, &app.palette);
+            assert_eq!(
+                pane_state_tint(&app, &ws, pane_id),
+                icon_style.fg,
+                "border tint drifted from the sidebar icon for {state:?} seen={seen}"
+            );
+        }
     }
 
     #[test]

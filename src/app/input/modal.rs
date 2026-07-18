@@ -1232,6 +1232,33 @@ impl App {
                     self.state.mode = Mode::ContextMenu;
                 }
             }
+            (ContextMenuKind::Pane { pane_id, .. }, Some("Border color…")) => {
+                // Step 1 → open the swatch list for this pane.
+                self.state.context_menu = Some(ContextMenuState {
+                    kind: ContextMenuKind::PaneBorderColor { pane_id },
+                    x: menu_x,
+                    y: menu_y,
+                    list: MenuListState::new(0),
+                });
+                self.state.mode = Mode::ContextMenu;
+            }
+            (ContextMenuKind::PaneBorderColor { pane_id }, _) => {
+                // Step 2 → apply the swatch. "default" clears the override so
+                // the pane falls back to state tint / focus color / theme.
+                if let Some(swatch) = crate::app::state::PANE_BORDER_SWATCHES.get(idx) {
+                    match swatch.hex {
+                        Some(hex) => {
+                            self.state
+                                .pane_border_overrides
+                                .insert(pane_id, crate::config::parse_color(hex));
+                        }
+                        None => {
+                            self.state.pane_border_overrides.remove(&pane_id);
+                        }
+                    }
+                }
+                leave_modal(&mut self.state);
+            }
             (
                 ContextMenuKind::MovePaneTarget {
                     ws_idx,

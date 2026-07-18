@@ -3,7 +3,10 @@ use ratatui::layout::Rect;
 
 use crate::{
     app::{
-        state::{AppState, ExperimentSetting, SettingsSection, THEME_NAMES},
+        state::{
+            AppState, ExperimentSetting, PaneBorderInput, PaneBorderTarget, SettingsSection,
+            PANE_BORDER_COLUMNS, PANE_BORDER_CUSTOM_INDEX, PANE_BORDER_SWATCHES, THEME_NAMES,
+        },
         App, Mode,
     },
     config::ToastDelivery,
@@ -19,7 +22,107 @@ pub(super) enum SettingsAction {
     SaveAgentBorderLabels(bool),
     SavePaneHistory(bool),
     SaveSwitchAsciiInputSourceInPrefix(bool),
+    SavePaneBorder(PaneBorderTarget, Option<String>),
     InstallRecommendedIntegrations,
+}
+
+/// The border target the pane borders section is currently editing.
+fn selected_pane_border_target(state: &AppState) -> PaneBorderTarget {
+    PaneBorderTarget::ALL
+        .get(state.settings.list.selected)
+        .copied()
+        .unwrap_or(PaneBorderTarget::Focused)
+}
+
+/// Point the swatch cursor at the color the selected target already uses, so
+/// entering the row (or switching rows) highlights the active choice rather
+/// than resetting to the first column.
+fn sync_pane_border_column(state: &mut AppState) {
+    let target = selected_pane_border_target(state);
+    let current = target.current(state);
+    let column = match current {
+        None => 0,
+        Some(color) => PANE_BORDER_SWATCHES
+            .iter()
+            .position(|swatch| {
+                swatch
+                    .hex
+                    .is_some_and(|hex| crate::config::parse_color(hex) == color)
+            })
+            // A color set by hand that matches no preset lands on "custom…".
+            .unwrap_or(PANE_BORDER_CUSTOM_INDEX),
+    };
+    state.settings.pane_border_column = column;
+}
+
+/// Apply the highlighted swatch, or open the hex field when it is "custom…".
+fn commit_pane_border_column(state: &mut AppState) -> Option<SettingsAction> {
+    let target = selected_pane_border_target(state);
+    let column = state.settings.pane_border_column;
+    if column == PANE_BORDER_CUSTOM_INDEX {
+        // Seed the field with the current color so editing beats retyping.
+        let seed = target
+            .current(state)
+            .map(color_to_hex)
+            .unwrap_or_else(|| "#".to_string());
+        state.settings.pane_border_input = Some(PaneBorderInput {
+            target,
+            buffer: seed,
+        });
+        return None;
+    }
+    let hex = PANE_BORDER_SWATCHES.get(column)?.hex.map(str::to_string);
+    Some(SettingsAction::SavePaneBorder(target, hex))
+}
+
+/// Render a resolved color back to `#rrggbb` for seeding the hex field.
+fn color_to_hex(color: ratatui::style::Color) -> String {
+    match color {
+        ratatui::style::Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+        _ => "#".to_string(),
+    }
+}
+
+/// Key handling while the "custom…" hex field is open.
+fn handle_pane_border_input_key(state: &mut AppState, key: KeyEvent) -> Option<SettingsAction> {
+    let input = state.settings.pane_border_input.as_mut()?;
+    match key.code {
+        KeyCode::Char(c) if c.is_ascii_hexdigit() || c == '#' => {
+            // Keep one leading '#' and cap at "#rrggbb".
+            if c == '#' {
+                if input.buffer.is_empty() {
+                    input.buffer.push('#');
+                }
+            } else if input.buffer.trim_start_matches('#').len() < 6 {
+                if input.buffer.is_empty() {
+                    input.buffer.push('#');
+                }
+                input.buffer.push(c.to_ascii_lowercase());
+            }
+            None
+        }
+        KeyCode::Backspace => {
+            input.buffer.pop();
+            None
+        }
+        KeyCode::Enter => {
+            let parsed = input.parsed();
+            match parsed {
+                Some(hex) => {
+                    let target = input.target;
+                    state.settings.pane_border_input = None;
+                    Some(SettingsAction::SavePaneBorder(target, Some(hex)))
+                }
+                // Incomplete hex: hold the field open rather than saving junk.
+                None => None,
+            }
+        }
+        KeyCode::Esc => {
+            state.settings.pane_border_input = None;
+            None
+        }
+        _ => None,
+    }
 }
 
 /// Map an Experiments row index to the toggle action that flips it.
@@ -52,6 +155,9 @@ impl App {
                 }
                 SettingsAction::SaveSwitchAsciiInputSourceInPrefix(enabled) => {
                     self.save_switch_ascii_input_source_in_prefix(enabled)
+                }
+                SettingsAction::SavePaneBorder(target, color) => {
+                    self.save_pane_border(target, color)
                 }
                 SettingsAction::InstallRecommendedIntegrations => {
                     self.install_recommended_integrations()
@@ -240,8 +346,9 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 state.settings.list.selected = toast_delivery_index(state.toast_delivery());
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
-                state.settings.section = SettingsSection::Integrations;
+                state.settings.section = SettingsSection::PaneBorders;
                 state.settings.list.selected = 0;
+                sync_pane_border_column(state);
             }
             _ => {
                 if let Some(super::modal::ModalAction::Close) =
@@ -251,6 +358,51 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 }
             }
         },
+        // Left/Right walk the swatch strip here, so section navigation is
+        // Tab/BackTab only. The rendered footer spells this out.
+        SettingsSection::PaneBorders => {
+            if state.settings.pane_border_input.is_some() {
+                return handle_pane_border_input_key(state, key);
+            }
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
+                    state.settings.list.selected = 1 - state
+                        .settings
+                        .list
+                        .selected
+                        .min(PaneBorderTarget::ALL.len() - 1);
+                    sync_pane_border_column(state);
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    let current = state.settings.pane_border_column;
+                    state.settings.pane_border_column =
+                        current.saturating_sub(1).min(PANE_BORDER_COLUMNS - 1);
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    state.settings.pane_border_column =
+                        (state.settings.pane_border_column + 1).min(PANE_BORDER_COLUMNS - 1);
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    return commit_pane_border_column(state);
+                }
+                KeyCode::BackTab => {
+                    state.settings.section = SettingsSection::PaneLabels;
+                    state.settings.list.selected =
+                        usize::from(!state.agent_border_labels_enabled());
+                }
+                KeyCode::Tab => {
+                    state.settings.section = SettingsSection::Integrations;
+                    state.settings.list.selected = 0;
+                }
+                _ => {
+                    if let Some(super::modal::ModalAction::Close) =
+                        super::modal::modal_action_from_key(&key, super::modal::SETTINGS_ACTIONS)
+                    {
+                        cancel_settings(state);
+                    }
+                }
+            }
+        }
         SettingsSection::Experiments => match key.code {
             KeyCode::Up | KeyCode::Char('k') => state.settings.list.move_prev(),
             KeyCode::Down | KeyCode::Char('j') => {
@@ -280,8 +432,9 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 return Some(SettingsAction::InstallRecommendedIntegrations);
             }
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                state.settings.section = SettingsSection::PaneLabels;
-                state.settings.list.selected = usize::from(!state.agent_border_labels_enabled());
+                state.settings.section = SettingsSection::PaneBorders;
+                state.settings.list.selected = 0;
+                sync_pane_border_column(state);
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
                 state.settings.section = SettingsSection::Experiments;
@@ -312,9 +465,13 @@ pub(crate) fn open_settings_at(state: &mut AppState, section: SettingsSection) {
         SettingsSection::Sound => usize::from(!state.sound_enabled()),
         SettingsSection::Toast => toast_delivery_index(state.toast_delivery()),
         SettingsSection::PaneLabels => usize::from(!state.agent_border_labels_enabled()),
+        SettingsSection::PaneBorders => 0,
         SettingsSection::Experiments => 0,
         SettingsSection::Integrations => 0,
     };
+    if section == SettingsSection::PaneBorders {
+        sync_pane_border_column(state);
+    }
     state.mode = Mode::Settings;
 }
 
@@ -407,6 +564,13 @@ impl AppState {
                     None
                 }
             }
+            // Each border occupies a header row and a swatch row; clicking
+            // either selects that border. Rows: 0/1 focused, 3/4 unfocused.
+            SettingsSection::PaneBorders => match row.checked_sub(area.y)? {
+                0 | 1 => Some(0),
+                3 | 4 => Some(1),
+                _ => None,
+            },
             SettingsSection::Experiments => {
                 let list_y = area.y + 3;
                 if row >= list_y && row < list_y + ExperimentSetting::ALL.len() as u16 {
@@ -431,9 +595,13 @@ impl AppState {
                         SettingsSection::PaneLabels => {
                             usize::from(!self.agent_border_labels_enabled())
                         }
+                        SettingsSection::PaneBorders => 0,
                         SettingsSection::Experiments => 0,
                         SettingsSection::Integrations => 0,
                     });
+                    if section == SettingsSection::PaneBorders {
+                        sync_pane_border_column(self);
+                    }
                     return None;
                 }
                 if let Some(idx) = self.settings_list_index_at(mouse.column, mouse.row) {
@@ -454,6 +622,23 @@ impl AppState {
                         SettingsSection::PaneLabels => {
                             let enabled = idx == 0;
                             Some(SettingsAction::SaveAgentBorderLabels(enabled))
+                        }
+                        // Clicking a swatch both selects the border and applies
+                        // the color under the cursor; clicking elsewhere on the
+                        // row just selects the border.
+                        SettingsSection::PaneBorders => {
+                            let content_x = self.settings_content_rect().x;
+                            match mouse
+                                .column
+                                .checked_sub(content_x)
+                                .and_then(crate::app::state::pane_border_column_at)
+                            {
+                                Some(column) => {
+                                    self.settings.pane_border_column = column;
+                                    commit_pane_border_column(self)
+                                }
+                                None => None,
+                            }
                         }
                         SettingsSection::Experiments => experiment_toggle_action(self, idx),
                         SettingsSection::Integrations => None,
@@ -491,6 +676,177 @@ mod tests {
 
     use super::super::{app_for_mouse_test, mouse, state_with_workspaces};
     use super::*;
+
+    #[test]
+    fn pane_border_hex_input_accepts_only_complete_hex() {
+        let mut input = PaneBorderInput {
+            target: PaneBorderTarget::Focused,
+            buffer: String::new(),
+        };
+        for (buffer, expected) in [
+            ("#00ffff", Some("#00ffff")),
+            ("#0ff", Some("#0ff")),
+            ("00ffff", Some("#00ffff")),
+            ("#00FFFF", Some("#00ffff")),
+            ("#00ff", None),
+            ("#", None),
+            ("", None),
+        ] {
+            input.buffer = buffer.to_string();
+            assert_eq!(
+                input.parsed().as_deref(),
+                expected,
+                "buffer {buffer:?} parsed unexpectedly"
+            );
+        }
+    }
+
+    #[test]
+    fn pane_border_column_syncs_to_the_color_already_in_use() {
+        let mut state = state_with_workspaces(&["test"]);
+
+        // Unset falls on the "default" column.
+        state.pane_border_focused = None;
+        state.settings.list.selected = 0;
+        sync_pane_border_column(&mut state);
+        assert_eq!(state.settings.pane_border_column, 0);
+
+        // A preset color lands on that preset's column.
+        let cyan_column = PANE_BORDER_SWATCHES
+            .iter()
+            .position(|s| s.hex == Some("#00ffff"))
+            .expect("cyan preset");
+        state.pane_border_focused = Some(crate::config::parse_color("#00ffff"));
+        sync_pane_column_for_test(&mut state);
+        assert_eq!(state.settings.pane_border_column, cyan_column);
+
+        // A hand-picked color that matches no preset lands on "custom…".
+        state.pane_border_focused = Some(crate::config::parse_color("#123456"));
+        sync_pane_column_for_test(&mut state);
+        assert_eq!(state.settings.pane_border_column, PANE_BORDER_CUSTOM_INDEX);
+    }
+
+    fn sync_pane_column_for_test(state: &mut AppState) {
+        sync_pane_border_column(state);
+    }
+
+    #[test]
+    fn pane_border_default_column_clears_the_key_and_presets_save_hex() {
+        let mut state = state_with_workspaces(&["test"]);
+        state.settings.section = SettingsSection::PaneBorders;
+        state.settings.list.selected = 1; // unfocused border
+
+        state.settings.pane_border_column = 0; // "default"
+        assert_eq!(
+            commit_pane_border_column(&mut state),
+            Some(SettingsAction::SavePaneBorder(
+                PaneBorderTarget::Unfocused,
+                None
+            )),
+            "default must clear the key, not write a literal color"
+        );
+
+        let cyan_column = PANE_BORDER_SWATCHES
+            .iter()
+            .position(|s| s.hex == Some("#00ffff"))
+            .expect("cyan preset");
+        state.settings.pane_border_column = cyan_column;
+        assert_eq!(
+            commit_pane_border_column(&mut state),
+            Some(SettingsAction::SavePaneBorder(
+                PaneBorderTarget::Unfocused,
+                Some("#00ffff".to_string())
+            ))
+        );
+    }
+
+    #[test]
+    fn pane_border_custom_column_opens_a_seeded_hex_field() {
+        let mut state = state_with_workspaces(&["test"]);
+        state.settings.section = SettingsSection::PaneBorders;
+        state.settings.list.selected = 0;
+        state.pane_border_focused = Some(crate::config::parse_color("#123456"));
+        state.settings.pane_border_column = PANE_BORDER_CUSTOM_INDEX;
+
+        assert_eq!(commit_pane_border_column(&mut state), None);
+        let input = state
+            .settings
+            .pane_border_input
+            .as_ref()
+            .expect("custom hex field opens");
+        assert_eq!(input.target, PaneBorderTarget::Focused);
+        assert_eq!(
+            input.buffer, "#123456",
+            "field seeds with the current color"
+        );
+
+        // Enter commits once the hex is complete.
+        let action = handle_pane_border_input_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
+        assert_eq!(
+            action,
+            Some(SettingsAction::SavePaneBorder(
+                PaneBorderTarget::Focused,
+                Some("#123456".to_string())
+            ))
+        );
+        assert!(state.settings.pane_border_input.is_none());
+    }
+
+    #[test]
+    fn pane_border_hex_field_holds_open_on_incomplete_input_and_cancels_on_esc() {
+        let mut state = state_with_workspaces(&["test"]);
+        state.settings.pane_border_input = Some(PaneBorderInput {
+            target: PaneBorderTarget::Focused,
+            buffer: "#00f".to_string(),
+        });
+
+        // Backspace leaves an incomplete value; enter must not save it.
+        handle_pane_border_input_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        );
+        assert_eq!(
+            handle_pane_border_input_key(
+                &mut state,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+            ),
+            None
+        );
+        assert!(
+            state.settings.pane_border_input.is_some(),
+            "incomplete hex keeps the field open"
+        );
+
+        handle_pane_border_input_key(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(state.settings.pane_border_input.is_none());
+    }
+
+    #[test]
+    fn pane_border_swatch_hit_testing_matches_rendered_cells() {
+        use crate::app::state::{
+            pane_border_cell_width, pane_border_column_at, PANE_BORDER_COLUMNS, PANE_BORDER_STRIP_X,
+        };
+
+        // Walk the strip cell by cell and confirm every rendered column is
+        // recoverable from its own x range.
+        let mut x = PANE_BORDER_STRIP_X;
+        for column in 0..PANE_BORDER_COLUMNS {
+            let width = pane_border_cell_width(column);
+            for offset in x..x + width {
+                assert_eq!(
+                    pane_border_column_at(offset),
+                    Some(column),
+                    "x {offset} should map to column {column}"
+                );
+            }
+            x += width;
+        }
+        // Past the end of the strip nothing is selected.
+        assert_eq!(pane_border_column_at(x), None);
+    }
 
     #[test]
     fn settings_cancel_restores_previewed_theme_from_other_sections() {
@@ -586,6 +942,13 @@ mod tests {
         let mut state = state_with_workspaces(&["test"]);
         open_settings_at(&mut state, SettingsSection::PaneLabels);
 
+        // pane borders sits between labels and integrations in both directions.
+        update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
+        );
+        assert_eq!(state.settings.section, SettingsSection::PaneBorders);
+
         update_settings_state(
             &mut state,
             KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
@@ -615,6 +978,12 @@ mod tests {
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::empty()),
         );
         assert_eq!(state.settings.section, SettingsSection::Integrations);
+
+        update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::empty()),
+        );
+        assert_eq!(state.settings.section, SettingsSection::PaneBorders);
 
         update_settings_state(
             &mut state,

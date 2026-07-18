@@ -945,6 +945,7 @@ pub enum SettingsSection {
     Sound,
     Toast,
     PaneLabels,
+    PaneBorders,
     Experiments,
     Integrations,
 }
@@ -955,18 +956,157 @@ impl SettingsSection {
         Self::Sound,
         Self::Toast,
         Self::PaneLabels,
+        Self::PaneBorders,
         Self::Integrations,
         Self::Experiments,
     ];
 
+    // Labels are kept short because the settings popup is a fixed 76 columns
+    // and the tab strip clips: seven tabs only fit when these stay terse.
     pub fn label(self) -> &'static str {
         match self {
             Self::Theme => "theme",
             Self::Sound => "sound",
             Self::Toast => "toasts",
-            Self::PaneLabels => "pane labels",
+            Self::PaneLabels => "labels",
+            Self::PaneBorders => "borders",
             Self::Experiments => "experiments",
             Self::Integrations => "integrations",
+        }
+    }
+}
+
+/// Which pane border color a settings row edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneBorderTarget {
+    Focused,
+    Unfocused,
+}
+
+impl PaneBorderTarget {
+    pub const ALL: [Self; 2] = [Self::Focused, Self::Unfocused];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Focused => "focused border",
+            Self::Unfocused => "unfocused border",
+        }
+    }
+
+    /// The `[ui]` config key this target persists to.
+    pub fn config_key(self) -> &'static str {
+        match self {
+            Self::Focused => "pane_border_focused",
+            Self::Unfocused => "pane_border_unfocused",
+        }
+    }
+
+    pub fn current(self, state: &AppState) -> Option<ratatui::style::Color> {
+        match self {
+            Self::Focused => state.pane_border_focused,
+            Self::Unfocused => state.pane_border_unfocused,
+        }
+    }
+}
+
+/// One selectable swatch in the pane border picker. `hex` of `None` is the
+/// "theme default" entry, which removes the key and falls back to the palette.
+pub struct PaneBorderSwatch {
+    pub label: &'static str,
+    pub hex: Option<&'static str>,
+}
+
+/// Preset border colors, shared by both targets. The picker appends a trailing
+/// "custom…" entry that opens a hex field, so any color remains reachable.
+pub const PANE_BORDER_SWATCHES: &[PaneBorderSwatch] = &[
+    PaneBorderSwatch {
+        label: "default",
+        hex: None,
+    },
+    PaneBorderSwatch {
+        label: "cyan",
+        hex: Some("#00ffff"),
+    },
+    PaneBorderSwatch {
+        label: "blue",
+        hex: Some("#89b4fa"),
+    },
+    PaneBorderSwatch {
+        label: "green",
+        hex: Some("#a6e3a1"),
+    },
+    PaneBorderSwatch {
+        label: "mauve",
+        hex: Some("#cba6f7"),
+    },
+    PaneBorderSwatch {
+        label: "peach",
+        hex: Some("#fab387"),
+    },
+    PaneBorderSwatch {
+        label: "red",
+        hex: Some("#f38ba8"),
+    },
+    PaneBorderSwatch {
+        label: "grey",
+        hex: Some("#45475a"),
+    },
+];
+
+/// Index of the synthetic "custom…" column, which sits after every preset.
+pub const PANE_BORDER_CUSTOM_INDEX: usize = PANE_BORDER_SWATCHES.len();
+
+/// Number of selectable columns per target row (presets plus "custom…").
+pub const PANE_BORDER_COLUMNS: usize = PANE_BORDER_SWATCHES.len() + 1;
+
+/// Rendered width of one swatch cell, including its surrounding padding.
+/// Shared by the renderer and mouse hit-testing so the two cannot drift.
+pub fn pane_border_cell_width(column: usize) -> u16 {
+    if column == PANE_BORDER_CUSTOM_INDEX {
+        " custom… ".chars().count() as u16
+    } else if PANE_BORDER_SWATCHES
+        .get(column)
+        .is_some_and(|swatch| swatch.hex.is_none())
+    {
+        " auto ".len() as u16
+    } else {
+        " ███ ".chars().count() as u16
+    }
+}
+
+/// Column offset where the swatch strip starts, relative to the content area.
+pub const PANE_BORDER_STRIP_X: u16 = 1;
+
+/// Which swatch column sits under `offset_x` (relative to the content area),
+/// or `None` when the click landed past the end of the strip.
+pub fn pane_border_column_at(offset_x: u16) -> Option<usize> {
+    let mut x = PANE_BORDER_STRIP_X;
+    for column in 0..PANE_BORDER_COLUMNS {
+        let width = pane_border_cell_width(column);
+        if offset_x >= x && offset_x < x + width {
+            return Some(column);
+        }
+        x += width;
+    }
+    None
+}
+
+/// Live state for the "custom…" hex field.
+#[derive(Debug, Clone)]
+pub struct PaneBorderInput {
+    pub target: PaneBorderTarget,
+    pub buffer: String,
+}
+
+impl PaneBorderInput {
+    /// A hex value is committable once it is `#RGB` or `#RRGGBB`.
+    pub fn parsed(&self) -> Option<String> {
+        let raw = self.buffer.trim();
+        let hex = raw.strip_prefix('#').unwrap_or(raw);
+        if (hex.len() == 3 || hex.len() == 6) && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            Some(format!("#{}", hex.to_lowercase()))
+        } else {
+            None
         }
     }
 }
@@ -1092,6 +1232,11 @@ pub struct SettingsState {
     pub original_palette: Option<Palette>,
     /// The theme name before opening settings.
     pub original_theme: Option<String>,
+    /// Selected swatch column in the pane borders section. The row (which
+    /// border is being edited) is tracked by `list.selected`.
+    pub pane_border_column: usize,
+    /// Active "custom…" hex field, when the picker is capturing text.
+    pub pane_border_input: Option<PaneBorderInput>,
 }
 
 pub(crate) enum DragTarget {
@@ -1188,6 +1333,10 @@ pub enum ContextMenuKind {
         pane_id: PaneId,
         target_pane_id: PaneId,
     },
+    /// Step 2 of "Border color…": pick a swatch for one pane.
+    PaneBorderColor {
+        pane_id: PaneId,
+    },
 }
 
 /// Right-click context menu state.
@@ -1254,6 +1403,7 @@ impl ContextMenuState {
                 if *has_other_panes {
                     items.push("Move to pane…");
                 }
+                items.push("Border color…");
                 items.push("Split right");
                 items.push("Split down");
                 items.push("Zoom");
@@ -1264,6 +1414,7 @@ impl ContextMenuState {
             ContextMenuKind::MovePaneDirection { .. } => {
                 vec!["Move left", "Move right", "Move up", "Move down"]
             }
+            ContextMenuKind::PaneBorderColor { .. } => Vec::new(),
         }
     }
 
@@ -1274,6 +1425,12 @@ impl ContextMenuState {
             ContextMenuKind::MovePaneTarget { targets, .. } => {
                 targets.iter().map(|(_, label)| label.clone()).collect()
             }
+            // Same swatch vocabulary as the settings picker. Custom hex stays
+            // in settings, since a context menu has nowhere to type.
+            ContextMenuKind::PaneBorderColor { .. } => PANE_BORDER_SWATCHES
+                .iter()
+                .map(|swatch| swatch.label.to_string())
+                .collect(),
             _ => self
                 .items()
                 .iter()
@@ -1478,6 +1635,15 @@ pub struct AppState {
     pub pane_border_focused: Option<ratatui::style::Color>,
     /// Unfocused pane border color override; falls back to `palette.overlay0` when None.
     pub pane_border_unfocused: Option<ratatui::style::Color>,
+    /// How much agent state tints pane borders.
+    pub pane_border_agent_state: crate::config::PaneBorderAgentState,
+    /// Manual per-pane border colors, set from the pane context menu.
+    ///
+    /// Deliberately session-scoped and client-side: a `PaneId` is a runtime
+    /// handle, so persisting a color against one would either evaporate or
+    /// reattach to an unrelated pane later. Cleared when the pane closes.
+    pub pane_border_overrides:
+        std::collections::HashMap<crate::layout::PaneId, ratatui::style::Color>,
     pub hide_tab_bar_when_single_tab: bool,
     pub pane_history_persistence: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
@@ -1853,6 +2019,8 @@ impl AppState {
             show_agent_labels_on_pane_borders: false,
             pane_border_focused: None,
             pane_border_unfocused: None,
+            pane_border_agent_state: crate::config::PaneBorderAgentState::default(),
+            pane_border_overrides: std::collections::HashMap::new(),
             hide_tab_bar_when_single_tab: false,
             pane_history_persistence: false,
             reveal_hidden_cursor_for_cjk_ime: false,
@@ -1891,6 +2059,8 @@ impl AppState {
                 list: SelectionListState::new(0),
                 original_palette: None,
                 original_theme: None,
+                pane_border_column: 0,
+                pane_border_input: None,
             },
             integration_recommendations: Vec::new(),
             agent_manifest_summaries: Vec::new(),
@@ -2262,6 +2432,9 @@ impl AppState {
                         ws_idx,
                         tab_idx
                     );
+                }
+                ContextMenuKind::PaneBorderColor { pane_id } => {
+                    assert_live_pane(pane_id, "context menu border color pane");
                 }
             }
         }

@@ -671,6 +671,17 @@
           "description": "Color of unfocused panes' borders. Same formats as pane_border_focused. Unset falls back to the theme's dim overlay color."
         },
         {
+          "key": "ui.pane_border_agent_state",
+          "type": "enum",
+          "default": "\"attention\"",
+          "description": "How much agent state tints pane borders. off ignores agent state, attention tints only panes that need you (blocked, or finished but not yet seen), and always tints every agent state to match the sidebar icons.",
+          "values": [
+            "off",
+            "attention",
+            "always"
+          ]
+        },
+        {
           "key": "ui.hide_tab_bar_when_single_tab",
           "type": "boolean",
           "default": "false",

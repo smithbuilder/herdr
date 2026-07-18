@@ -54,6 +54,21 @@ fn default_update_channel() -> UpdateChannelConfig {
     }
 }
 
+/// How much agent state is reflected in pane border colors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PaneBorderAgentState {
+    /// Borders ignore agent state entirely.
+    Off,
+    /// Only tint borders for panes that want a human: blocked, and finished
+    /// but not yet looked at. Quiet panes keep the normal border color, so
+    /// color stays meaningful instead of constant.
+    #[default]
+    Attention,
+    /// Tint borders for every agent state, matching the sidebar icon exactly.
+    Always,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ToastDelivery {
@@ -814,6 +829,9 @@ pub struct UiConfig {
     /// Unfocused pane border color. Same formats as `pane_border_focused`.
     /// Unset falls back to the theme's dim overlay color.
     pub pane_border_unfocused: Option<String>,
+    /// How much agent state is reflected in pane border colors.
+    /// "off", "attention" (default), or "always".
+    pub pane_border_agent_state: PaneBorderAgentState,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
@@ -1014,6 +1032,7 @@ impl Default for UiConfig {
             show_agent_labels_on_pane_borders: false,
             pane_border_focused: None,
             pane_border_unfocused: None,
+            pane_border_agent_state: PaneBorderAgentState::default(),
             hide_tab_bar_when_single_tab: false,
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             sidebar: SidebarConfig::default(),

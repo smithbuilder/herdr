@@ -109,6 +109,9 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
         SettingsSection::Theme => {
             render_settings_theme(app, frame, content_area);
         }
+        SettingsSection::PaneBorders => {
+            render_settings_pane_borders(app, frame, content_area);
+        }
         SettingsSection::Sound => {
             render_settings_toggle(
                 frame,
@@ -358,6 +361,136 @@ fn render_settings_integrations(app: &AppState, frame: &mut Frame, area: Rect) {
 
     frame.render_widget(Paragraph::new(lines), rows[3]);
     frame.render_widget(footer, rows[5]);
+}
+
+/// Pane border pickers: one swatch strip per border, plus a hex field.
+///
+/// The strip is horizontal because the settings popup is only 22 rows tall;
+/// two stacked vertical lists of nine options would not fit.
+fn render_settings_pane_borders(app: &AppState, frame: &mut Frame, area: Rect) {
+    use crate::app::state::{PaneBorderTarget, PANE_BORDER_CUSTOM_INDEX, PANE_BORDER_SWATCHES};
+
+    let p = &app.palette;
+    let editing = app.settings.pane_border_input.as_ref();
+    let mut y = area.y;
+
+    for (row_idx, target) in PaneBorderTarget::ALL.iter().enumerate() {
+        if y + 1 >= area.y + area.height {
+            break;
+        }
+        let row_active = app.settings.list.selected == row_idx && editing.is_none();
+        let current = target.current(app);
+
+        // Header: which border, and the color it resolves to today.
+        let (name, detail) = match current {
+            None => ("default", "follows theme".to_string()),
+            Some(color) => (
+                PANE_BORDER_SWATCHES
+                    .iter()
+                    .find(|s| {
+                        s.hex
+                            .is_some_and(|h| crate::config::parse_color(h) == color)
+                    })
+                    .map(|s| s.label)
+                    .unwrap_or("custom"),
+                match color {
+                    ratatui::style::Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+                    _ => String::new(),
+                },
+            ),
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    format!(" {} ", target.label()),
+                    Style::default()
+                        .fg(if row_active { p.accent } else { p.subtext0 })
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("{name} "), Style::default().fg(p.text)),
+                Span::styled(detail, Style::default().fg(p.overlay1)),
+            ])),
+            Rect::new(area.x, y, area.width, 1),
+        );
+        y += 1;
+
+        // Swatch strip: "auto", the color blocks, then the custom entry.
+        let mut spans = vec![Span::raw(" ")];
+        for (col, swatch) in PANE_BORDER_SWATCHES.iter().enumerate() {
+            let selected = row_active && app.settings.pane_border_column == col;
+            let cell_style = match swatch.hex {
+                // "default" has no color of its own; render it as a word.
+                None => Style::default().fg(if selected { p.accent } else { p.overlay1 }),
+                Some(hex) => Style::default().fg(crate::config::parse_color(hex)),
+            };
+            let cell_style = if selected {
+                cell_style.bg(p.surface0).add_modifier(Modifier::BOLD)
+            } else {
+                cell_style
+            };
+            let body = match swatch.hex {
+                None => "auto".to_string(),
+                Some(_) => "███".to_string(),
+            };
+            spans.push(Span::styled(format!(" {body} "), cell_style));
+        }
+        let custom_selected =
+            row_active && app.settings.pane_border_column == PANE_BORDER_CUSTOM_INDEX;
+        let mut custom_style = Style::default().fg(if custom_selected {
+            p.accent
+        } else {
+            p.overlay1
+        });
+        if custom_selected {
+            custom_style = custom_style.bg(p.surface0).add_modifier(Modifier::BOLD);
+        }
+        spans.push(Span::styled(" custom… ", custom_style));
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)),
+            Rect::new(area.x, y, area.width, 1),
+        );
+        y += 2;
+    }
+
+    // Hex field, shown in place of the hint row while it is open.
+    if let Some(input) = editing {
+        if y < area.y + area.height {
+            let valid = input.parsed().is_some();
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(
+                        format!(" {} hex ", input.target.label()),
+                        Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        input.buffer.clone(),
+                        Style::default().fg(p.text).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("█", Style::default().fg(p.accent)),
+                    Span::styled(
+                        if valid {
+                            "  enter save · esc cancel"
+                        } else {
+                            "  type #rgb or #rrggbb · esc cancel"
+                        },
+                        Style::default().fg(if valid { p.green } else { p.overlay1 }),
+                    ),
+                ])),
+                Rect::new(area.x, y, area.width, 1),
+            );
+        }
+        return;
+    }
+
+    if y < area.y + area.height {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                " ↑↓ border · ←→ color · enter apply · tab section",
+                Style::default().fg(p.overlay1),
+            ))),
+            Rect::new(area.x, y, area.width, 1),
+        );
+    }
 }
 
 fn render_settings_theme(app: &AppState, frame: &mut Frame, area: Rect) {

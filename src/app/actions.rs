@@ -1491,6 +1491,9 @@ impl AppState {
             self.plugin_panes.remove(&pane_id);
             self.pane_graphics_layers.remove(&pane_id);
             self.pane_graphics_streams.remove(&pane_id);
+            // Drop the manual border color too: pane ids are recycled, so a
+            // stale entry would later paint an unrelated pane.
+            self.pane_border_overrides.remove(&pane_id);
         }
     }
 

@@ -630,6 +630,8 @@ impl App {
                 .pane_border_unfocused
                 .as_deref()
                 .map(crate::config::parse_color),
+            pane_border_agent_state: config.ui.pane_border_agent_state,
+            pane_border_overrides: std::collections::HashMap::new(),
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             pane_history_persistence: config.experimental.pane_history,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
@@ -660,6 +662,8 @@ impl App {
                 list: state::SelectionListState::new(0),
                 original_palette: None,
                 original_theme: None,
+                pane_border_column: 0,
+                pane_border_input: None,
             },
             integration_recommendations: crate::integration::integration_recommendations(),
             agent_manifest_summaries,
@@ -1429,6 +1433,9 @@ impl App {
                     .pane_border_unfocused
                     .as_deref()
                     .map(crate::config::parse_color);
+                // Manual per-pane overrides are session state and intentionally
+                // survive a config reload.
+                self.state.pane_border_agent_state = config.ui.pane_border_agent_state;
                 self.state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);

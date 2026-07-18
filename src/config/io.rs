@@ -591,6 +591,40 @@ mod tests {
         assert!(!updated.contains("onboarding = true"));
     }
 
+    /// A config may define only nested `[ui.*]` tables and no `[ui]` header.
+    /// Adding a plain `ui` key then appends `[ui]` after them, which is legal
+    /// TOML (an implicitly created super-table may be defined later) but is
+    /// easy to break. Guard that the result still parses and keeps the nested
+    /// values, since corrupting a user config here would be silent.
+    #[test]
+    fn upsert_section_value_into_nested_only_ui_config_stays_valid_toml() {
+        let content = concat!(
+            "onboarding = false\n",
+            "[ui.sidebar.agents]\n",
+            "rows = [[\"state_icon\", \"project\"]]\n",
+        );
+        let updated = upsert_section_value(content, "ui", "pane_border_focused", "\"#00ffff\"");
+
+        let parsed: toml::Table = updated.parse().expect("upserted config must parse");
+        let ui = parsed["ui"].as_table().expect("ui table");
+        assert_eq!(
+            ui["pane_border_focused"].as_str(),
+            Some("#00ffff"),
+            "new key must land under [ui]"
+        );
+        assert!(
+            ui["sidebar"]["agents"]["rows"].is_array(),
+            "nested sidebar rows must survive the upsert"
+        );
+        assert_eq!(parsed["onboarding"].as_bool(), Some(false));
+
+        // Clearing the key again must leave the rest of the config intact.
+        let cleared = remove_section_key(&updated, "ui", "pane_border_focused");
+        let parsed: toml::Table = cleared.parse().expect("cleared config must parse");
+        assert!(parsed["ui"]["sidebar"]["agents"]["rows"].is_array());
+        assert!(parsed["ui"].get("pane_border_focused").is_none());
+    }
+
     #[test]
     fn upsert_section_bool_adds_missing_section() {
         let updated = upsert_section_bool("", "ui.toast", "enabled", true);

@@ -79,6 +79,24 @@ impl App {
         }
     }
 
+    /// Persist one pane border color. `None` removes the key so the border
+    /// falls back to the theme palette instead of pinning a literal color.
+    pub(super) fn save_pane_border(
+        &mut self,
+        target: crate::app::state::PaneBorderTarget,
+        color: Option<String>,
+    ) {
+        let key = target.config_key();
+        if self.update_config_file("pane border color", |content| match color.as_deref() {
+            Some(value) => {
+                crate::config::upsert_section_value(content, "ui", key, &format!("\"{value}\""))
+            }
+            None => crate::config::remove_section_key(content, "ui", key),
+        }) {
+            self.apply_config_from_disk(false);
+        }
+    }
+
     pub(super) fn save_agent_border_labels(&mut self, enabled: bool) {
         if self.update_config_file("agent border labels", |content| {
             crate::config::upsert_section_bool(

@@ -2857,8 +2857,22 @@ mod tests {
             },
             x: 2,
             y: 2,
-            list: MenuListState::new(1),
+            list: MenuListState::new(0),
         });
+        // Resolve "Split right" by label: the pane menu grows over time, so a
+        // hardcoded index silently starts testing a different item.
+        let split_idx = app
+            .state
+            .context_menu
+            .as_ref()
+            .expect("pane context menu")
+            .items()
+            .iter()
+            .position(|item| *item == "Split right")
+            .expect("pane menu offers Split right");
+        if let Some(menu) = app.state.context_menu.as_mut() {
+            menu.list = MenuListState::new(split_idx);
+        }
         app.state.mode = Mode::ContextMenu;
 
         handle_context_menu_key(
