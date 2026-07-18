@@ -62,10 +62,12 @@ pub enum Agent {
     Kilo,
     Qodercli,
     Maki,
+    Goose,
+    Qwen,
 }
 
 impl Agent {
-    pub const SCREEN_MANIFEST_AGENTS: [Self; 19] = [
+    pub const SCREEN_MANIFEST_AGENTS: [Self; 21] = [
         Self::Pi,
         Self::Claude,
         Self::Codex,
@@ -85,6 +87,8 @@ impl Agent {
         Self::Kilo,
         Self::Qodercli,
         Self::Maki,
+        Self::Goose,
+        Self::Qwen,
     ];
 }
 
@@ -111,6 +115,8 @@ pub fn agent_label(agent: Agent) -> &'static str {
         Agent::Kilo => "kilo",
         Agent::Qodercli => "qodercli",
         Agent::Maki => "maki",
+        Agent::Goose => "goose",
+        Agent::Qwen => "qwen",
     }
 }
 
@@ -147,6 +153,8 @@ fn lookup_agent(name: &str) -> Option<Agent> {
         "kilo" | "kilo-code" | "kilo code" => Some(Agent::Kilo),
         "qodercli" | "qoderclicn" | "qoder" | "qodercn" => Some(Agent::Qodercli),
         "maki" => Some(Agent::Maki),
+        "goose" | "goose-cli" => Some(Agent::Goose),
+        "qwen" | "qwen-code" | "qwen code" => Some(Agent::Qwen),
         _ => None,
     }
 }

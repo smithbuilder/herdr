@@ -1,0 +1,39 @@
+id = "goose"
+version = "2026.07.17.2"
+min_engine_version = 3
+updated_at = "2026-07-17T00:00:00Z"
+aliases = ["goose-cli"]
+
+# Evidence: live pane reads of Block goose (2026-07-17).
+#
+# goose keeps persistent bottom chrome. The prompt footer is the idle
+# invariant and is the last non-empty row:
+#   "› Enter to send · Ctrl+J newline"
+# It sits under a context meter and the elapsed time of the last turn:
+#   "  ⏱ 13.35s"
+#   "  ━━╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 8% 10k/128k"
+# The meter and timer are incidental (they also render mid-turn), so only the
+# send hint is treated as an idle gate.
+#
+# goose hard-wraps this footer in narrow panes, so the gate must tolerate a
+# line break between any two words. A ~11 column pane renders the same footer
+# as:
+#   "› Enter to"
+#   "send · Ctrl"
+#   "+J newline"
+# Phrase-literal `contains` fails there; the interword \s* regex matches both
+# the wide and wrapped forms, and the region is sized to hold the wrapped
+# footer.
+#
+# Working is left to PTY activity, which is herdr's normal working authority.
+# goose blocker chrome (tool approval) has not been captured from a live pane
+# yet, so no speculative blocked rule is encoded here; add one from a real
+# read rather than guessing.
+
+[[rules]]
+id = "prompt_footer_idle"
+state = "idle"
+priority = 100
+region = "bottom_non_empty_lines(6)"
+visible_idle = true
+regex = ['(?i)enter\s*to\s*send']

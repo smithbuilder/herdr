@@ -1,0 +1,60 @@
+id = "qwen"
+version = "2026.07.17.2"
+min_engine_version = 3
+updated_at = "2026-07-17T00:00:00Z"
+aliases = ["qwen-code"]
+
+# Evidence: live pane reads of qwen-code (2026-07-17).
+#
+# qwen-code is a fork of gemini-cli and keeps its confirmation and cancel
+# chrome, so the blocked and working gates mirror the bundled gemini
+# manifest.
+#
+# Idle chrome is qwen-specific. The prompt box sits between two horizontal
+# rules and is followed by a footer carrying the session and model, then the
+# approval-mode line:
+#   "  ➜ research · qwen3-coder:30b"
+#   "  Auto mode (shift + tab to cycle)"
+# The session/model row varies per pane, so the invariant idle gate is the
+# approval-mode hint.
+#
+# Narrow panes degrade the two areas differently. Transcript and dialog body
+# text soft-wraps and keeps its content, so blocked/working gates only need to
+# tolerate a line break between words (interword \s*). The fixed footer is
+# instead ellipsis-truncated ("Auto m…" at ~11 columns), so the idle gate
+# cannot be recovered by any pattern at that width; it matches once the pane
+# is wide enough to render the hint. Known-agent idle fallback and PTY
+# activity still carry state there, so the truncation degrades confidence
+# rather than correctness.
+
+[[rules]]
+id = "apply_or_allow_change"
+state = "blocked"
+priority = 300
+region = "whole_recent"
+visible_blocker = true
+any = [
+  { regex = ['(?i)apply\s*this\s*change'] },
+  { regex = ['(?i)allow\s*execution'] },
+  { all = [{ contains = ["yes"] }, { any = [{ regex = ['(?i)waiting\s*for\s*user\s*confirmation'] }, { regex = ['(?i)do\s*you\s*want\s*to\s*proceed'] }] }] },
+  { line_regex = ['(?i)^\s*❯.*(yes|allow)'] },
+]
+
+[[rules]]
+id = "esc_cancel_working"
+state = "working"
+priority = 100
+region = "whole_recent"
+visible_working = true
+regex = ['(?i)esc\s*to\s*cancel']
+
+[[rules]]
+id = "approval_mode_footer_idle"
+state = "idle"
+priority = 90
+region = "bottom_non_empty_lines(6)"
+visible_idle = true
+regex = ['(?i)shift\s*\+\s*tab\s*to\s*cycle']
+not = [
+  { regex = ['(?i)esc\s*to\s*cancel'] },
+]

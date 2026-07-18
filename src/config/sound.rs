@@ -140,6 +140,9 @@ impl AgentSoundOverrides {
             Some(Agent::Kilo) => self.kilo,
             Some(Agent::Qodercli) => self.qodercli,
             Some(Agent::Maki) => self.maki,
+            // No dedicated sound override key yet; same precedent as Omp/Mastracode.
+            Some(Agent::Goose) => AgentSoundSetting::Default,
+            Some(Agent::Qwen) => AgentSoundSetting::Default,
             None => AgentSoundSetting::Default,
         }
     }
