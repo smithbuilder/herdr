@@ -82,6 +82,7 @@ fn spawn_server_with_env(
         "HERDR_CLIENT_SOCKET_PATH",
         runtime_dir.join("herdr-client.sock"),
     );
+    cmd.env_remove("HERDR_STARTUP_CWD");
     cmd.env("SHELL", "/bin/sh");
     for (key, value) in extra_env {
         cmd.env(key, value);
@@ -123,6 +124,7 @@ fn spawn_named_session_server(
     cmd.env("HERDR_SESSION", session_name);
     cmd.env_remove("HERDR_SOCKET_PATH");
     cmd.env_remove("HERDR_CLIENT_SOCKET_PATH");
+    cmd.env_remove("HERDR_STARTUP_CWD");
     cmd.env("SHELL", "/bin/sh");
 
     let child = pair.slave.spawn_command(cmd).unwrap();
@@ -158,6 +160,7 @@ fn spawn_default_session_server(config_home: &Path, runtime_dir: &Path) -> Spawn
     cmd.env_remove("HERDR_SESSION");
     cmd.env_remove("HERDR_SOCKET_PATH");
     cmd.env_remove("HERDR_CLIENT_SOCKET_PATH");
+    cmd.env_remove("HERDR_STARTUP_CWD");
     cmd.env("SHELL", "/bin/sh");
 
     let child = pair.slave.spawn_command(cmd).unwrap();
@@ -209,6 +212,7 @@ fn spawn_server_with_args_and_socket_env(
         cmd.env("HERDR_CLIENT_SOCKET_PATH", client_socket_env);
     } else {
         cmd.env_remove("HERDR_CLIENT_SOCKET_PATH");
+        cmd.env_remove("HERDR_STARTUP_CWD");
     }
     cmd.env("SHELL", "/bin/sh");
 

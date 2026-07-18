@@ -144,6 +144,7 @@ fn spawn_herdr_with_options(
     cmd.env("XDG_RUNTIME_DIR", runtime_dir);
     cmd.env("HERDR_SOCKET_PATH", socket_path);
     cmd.env_remove("HERDR_CLIENT_SOCKET_PATH");
+    cmd.env_remove("HERDR_STARTUP_CWD");
     cmd.env("SHELL", shell);
     cmd.env_remove("HERDR_ENV");
     if let Some(path) = path_override {

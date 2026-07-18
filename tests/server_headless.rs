@@ -126,6 +126,7 @@ fn spawn_server(
     cmd.env("XDG_RUNTIME_DIR", runtime_dir);
     cmd.env("HERDR_SOCKET_PATH", api_socket_path);
     cmd.env_remove("HERDR_CLIENT_SOCKET_PATH");
+    cmd.env_remove("HERDR_STARTUP_CWD");
     cmd.env("SHELL", "/bin/sh");
     cmd.env_remove("HERDR_ENV");
 
@@ -560,6 +561,7 @@ fn duplicate_server_start_fails_gracefully() {
     cmd.env("XDG_RUNTIME_DIR", &runtime_dir);
     cmd.env("HERDR_SOCKET_PATH", &api_socket);
     cmd.env_remove("HERDR_CLIENT_SOCKET_PATH");
+    cmd.env_remove("HERDR_STARTUP_CWD");
     cmd.env("SHELL", "/bin/sh");
     cmd.env_remove("HERDR_ENV");
 

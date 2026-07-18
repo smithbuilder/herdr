@@ -180,6 +180,7 @@ fn spawn_named_server(
         .env("XDG_RUNTIME_DIR", runtime_dir)
         .env_remove("HERDR_SOCKET_PATH")
         .env_remove("HERDR_CLIENT_SOCKET_PATH")
+        .env_remove("HERDR_STARTUP_CWD")
         .env_remove("HERDR_ENV")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -225,6 +226,7 @@ fn run_named_cli_with_env_and_socket_override(
         .env("XDG_CONFIG_HOME", config_home)
         .env("XDG_RUNTIME_DIR", runtime_dir)
         .env_remove("HERDR_CLIENT_SOCKET_PATH")
+        .env_remove("HERDR_STARTUP_CWD")
         .env_remove("HERDR_ENV");
     for (key, value) in envs {
         command.env(key, value);
@@ -296,6 +298,7 @@ fn spawn_herdr_with_config(
     cmd.env("XDG_RUNTIME_DIR", runtime_dir);
     cmd.env("HERDR_SOCKET_PATH", socket_path);
     cmd.env_remove("HERDR_CLIENT_SOCKET_PATH");
+    cmd.env_remove("HERDR_STARTUP_CWD");
     cmd.env("SHELL", "/bin/sh");
     cmd.env_remove("HERDR_ENV");
     if let Some(path) = path_override {
