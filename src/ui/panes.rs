@@ -377,7 +377,11 @@ pub(super) fn render_panes(
             rt.render(frame, info.inner_rect, show_cursor);
             render_pane_scrollbar(app, frame, info, rt);
 
-            let should_dim = !info.is_focused && multi_pane && !terminal_active;
+            // Panes dim either because another surface has focus, or because
+            // the session has gone stale. Focusing a stale pane un-dims it, so
+            // the staleness cue never costs legibility while you read it.
+            let should_dim = (!info.is_focused && multi_pane && !terminal_active)
+                || app.pane_is_stale(ws, info.id, info.is_focused);
             if should_dim {
                 let inner = info.inner_rect;
                 let buf = frame.buffer_mut();
@@ -712,6 +716,9 @@ fn render_pane_border_titles(
         let mut style = Style::default().fg(color);
         if info.is_focused {
             style = style.add_modifier(Modifier::BOLD);
+        }
+        if app.pane_is_stale(ws, info.id, info.is_focused) {
+            style = style.add_modifier(Modifier::DIM);
         }
         buf.set_stringn(
             start_x,
@@ -1085,6 +1092,79 @@ mod tests {
             pane.seen = seen;
         }
         (app, ws, pane_id)
+    }
+
+    #[test]
+    fn stale_pane_fades_only_when_unfocused_and_past_the_threshold() {
+        use crate::detect::AgentState;
+        use std::time::Duration;
+
+        let (mut app, ws, pane_id) = app_with_pane_state(AgentState::Idle, true);
+        app.pane_stale_after = Some(Duration::from_secs(3 * 3600));
+
+        // Fresh session: not stale.
+        assert!(!app.pane_is_stale(&ws, pane_id, false));
+
+        // Push last activity past the threshold.
+        let terminal_id = ws.tabs[0].panes[&pane_id].attached_terminal_id.clone();
+        let stale_at = std::time::Instant::now() - Duration::from_secs(4 * 3600);
+        app.terminals
+            .get_mut(&terminal_id)
+            .expect("terminal")
+            .last_activity_at = stale_at;
+
+        assert!(app.pane_is_stale(&ws, pane_id, false));
+        assert!(
+            !app.pane_is_stale(&ws, pane_id, true),
+            "the focused pane never fades, so reading it stays legible"
+        );
+
+        // A zero/disabled threshold never fades anything.
+        app.pane_stale_after = None;
+        assert!(!app.pane_is_stale(&ws, pane_id, false));
+    }
+
+    #[test]
+    fn marking_activity_clears_staleness() {
+        use crate::detect::AgentState;
+        use std::time::Duration;
+
+        let (mut app, ws, pane_id) = app_with_pane_state(AgentState::Idle, true);
+        app.pane_stale_after = Some(Duration::from_secs(3 * 3600));
+        let terminal_id = ws.tabs[0].panes[&pane_id].attached_terminal_id.clone();
+        app.terminals
+            .get_mut(&terminal_id)
+            .expect("terminal")
+            .last_activity_at = std::time::Instant::now() - Duration::from_secs(4 * 3600);
+        assert!(app.pane_is_stale(&ws, pane_id, false));
+
+        app.terminals
+            .get_mut(&terminal_id)
+            .expect("terminal")
+            .mark_activity();
+        assert!(!app.pane_is_stale(&ws, pane_id, false));
+    }
+
+    #[test]
+    fn stale_threshold_hours_convert_and_disable_on_zero() {
+        use crate::config::pane_stale_after_duration;
+        use std::time::Duration;
+
+        assert_eq!(
+            pane_stale_after_duration(3.0),
+            Some(Duration::from_secs(3 * 3600))
+        );
+        assert_eq!(
+            pane_stale_after_duration(0.5),
+            Some(Duration::from_secs(1800)),
+            "fractional hours are allowed"
+        );
+        // Zero, negative, and non-finite disable fading rather than making
+        // every pane instantly stale.
+        assert_eq!(pane_stale_after_duration(0.0), None);
+        assert_eq!(pane_stale_after_duration(-1.0), None);
+        assert_eq!(pane_stale_after_duration(f64::NAN), None);
+        assert_eq!(pane_stale_after_duration(f64::INFINITY), None);
     }
 
     #[test]

@@ -1637,6 +1637,8 @@ pub struct AppState {
     pub pane_border_unfocused: Option<ratatui::style::Color>,
     /// How much agent state tints pane borders.
     pub pane_border_agent_state: crate::config::PaneBorderAgentState,
+    /// How long a pane may sit quiet before it fades. `None` disables fading.
+    pub pane_stale_after: Option<std::time::Duration>,
     /// Manual per-pane border colors, set from the pane context menu.
     ///
     /// Deliberately session-scoped and client-side: a `PaneId` is a runtime
@@ -2020,6 +2022,11 @@ impl AppState {
             pane_border_focused: None,
             pane_border_unfocused: None,
             pane_border_agent_state: crate::config::PaneBorderAgentState::default(),
+            // Read the shipped default rather than repeating it, so this
+            // helper cannot drift from the real config default.
+            pane_stale_after: crate::config::pane_stale_after_duration(
+                crate::config::Config::default().ui.pane_stale_after_hours,
+            ),
             pane_border_overrides: std::collections::HashMap::new(),
             hide_tab_bar_when_single_tab: false,
             pane_history_persistence: false,

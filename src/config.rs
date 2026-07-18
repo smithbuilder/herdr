@@ -35,6 +35,14 @@ pub use self::{
 pub(crate) use self::io::upsert_top_level_bool;
 pub(crate) use self::keybinds::parse_key_combo;
 
+/// Convert the configured stale threshold in hours into a duration.
+///
+/// Zero, negative, and non-finite values disable fading rather than making
+/// every pane instantly stale.
+pub fn pane_stale_after_duration(hours: f64) -> Option<std::time::Duration> {
+    (hours.is_finite() && hours > 0.0).then(|| std::time::Duration::from_secs_f64(hours * 3600.0))
+}
+
 pub const CONFIG_PATH_ENV_VAR: &str = "HERDR_CONFIG_PATH";
 pub const DEFAULT_SCROLLBACK_LIMIT_BYTES: usize = 10_000_000;
 pub const DEFAULT_MOUSE_SCROLL_LINES: usize = 3;

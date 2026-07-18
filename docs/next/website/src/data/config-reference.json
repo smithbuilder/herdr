@@ -671,6 +671,12 @@
           "description": "Color of unfocused panes' borders. Same formats as pane_border_focused. Unset falls back to the theme's dim overlay color."
         },
         {
+          "key": "ui.pane_stale_after_hours",
+          "type": "number",
+          "default": "3",
+          "description": "Fade panes whose session has been quiet for this many hours, so forgotten sessions are obvious at a glance. Activity means an agent state change or input you typed, not raw output, so a pane repainting a spinner still goes stale. The focused pane never fades. Fractional values are allowed (0.5 = 30 minutes); 0 disables fading."
+        },
+        {
           "key": "ui.pane_border_agent_state",
           "type": "enum",
           "default": "\"attention\"",

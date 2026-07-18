@@ -95,6 +95,14 @@ pub struct TerminalState {
     metadata_report_sequences: HashMap<String, u64>,
     metadata_token_sequence_sources: std::collections::HashSet<String>,
     pub state: AgentState,
+    /// When this session last did something meaningful, used to fade panes
+    /// that have gone stale.
+    ///
+    /// Deliberately driven by agent state transitions and user input, not by
+    /// raw PTY output: agent TUIs repaint spinners, timers, and status lines
+    /// constantly, so an output-based clock would never let anything go stale.
+    /// A pane sitting at a prompt for hours is exactly what we want to catch.
+    pub last_activity_at: Instant,
     pub last_agent_state_change_seq: Option<u64>,
     pub revision: u64,
     pub launch_argv: Option<Vec<String>>,
@@ -131,7 +139,19 @@ impl TerminalState {
             respawn_shell_on_exit: false,
             recent_agent_process_exit_at: None,
             pending_agent_resume_plan: None,
+            last_activity_at: Instant::now(),
         }
+    }
+
+    /// Mark this session as having just done something a human would count as
+    /// activity. See `last_activity_at` for what deliberately does not count.
+    pub fn mark_activity(&mut self) {
+        self.last_activity_at = Instant::now();
+    }
+
+    /// How long this session has been quiet.
+    pub fn idle_for(&self) -> std::time::Duration {
+        self.last_activity_at.elapsed()
     }
 
     pub(crate) fn terminal_title_stripped(&self) -> Option<String> {
@@ -1379,6 +1399,9 @@ impl TerminalState {
         }
 
         self.state = state;
+        // Reached only on a real transition; the early return above covers the
+        // no-change case, so this does not tick on every detection pass.
+        self.last_activity_at = now;
         Some(EffectiveStateChange {
             previous_agent_label,
             previous_known_agent,

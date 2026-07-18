@@ -54,6 +54,9 @@ fn default_update_channel() -> UpdateChannelConfig {
     }
 }
 
+/// Hours a pane may sit quiet before it renders as stale.
+pub const DEFAULT_PANE_STALE_AFTER_HOURS: f64 = 3.0;
+
 /// How much agent state is reflected in pane border colors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -832,6 +835,10 @@ pub struct UiConfig {
     /// How much agent state is reflected in pane border colors.
     /// "off", "attention" (default), or "always".
     pub pane_border_agent_state: PaneBorderAgentState,
+    /// Fade panes whose session has been quiet for this many hours, so
+    /// forgotten sessions are obvious at a glance. Default: 3. Set to 0 to
+    /// disable fading. Fractional values are allowed (0.5 = 30 minutes).
+    pub pane_stale_after_hours: f64,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
@@ -1033,6 +1040,7 @@ impl Default for UiConfig {
             pane_border_focused: None,
             pane_border_unfocused: None,
             pane_border_agent_state: PaneBorderAgentState::default(),
+            pane_stale_after_hours: DEFAULT_PANE_STALE_AFTER_HOURS,
             hide_tab_bar_when_single_tab: false,
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             sidebar: SidebarConfig::default(),

@@ -631,6 +631,9 @@ impl App {
                 .as_deref()
                 .map(crate::config::parse_color),
             pane_border_agent_state: config.ui.pane_border_agent_state,
+            pane_stale_after: crate::config::pane_stale_after_duration(
+                config.ui.pane_stale_after_hours,
+            ),
             pane_border_overrides: std::collections::HashMap::new(),
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             pane_history_persistence: config.experimental.pane_history,
@@ -1436,6 +1439,8 @@ impl App {
                 // Manual per-pane overrides are session state and intentionally
                 // survive a config reload.
                 self.state.pane_border_agent_state = config.ui.pane_border_agent_state;
+                self.state.pane_stale_after =
+                    crate::config::pane_stale_after_duration(config.ui.pane_stale_after_hours);
                 self.state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);

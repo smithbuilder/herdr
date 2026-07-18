@@ -1163,6 +1163,42 @@ impl AppState {
         }
     }
 
+    /// Record that a pane just saw user activity, for stale-pane fading.
+    pub(crate) fn mark_pane_activity(&mut self, ws_idx: usize, pane_id: crate::layout::PaneId) {
+        let Some(terminal_id) = self
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.pane_state(pane_id))
+            .map(|pane| pane.attached_terminal_id.clone())
+        else {
+            return;
+        };
+        if let Some(terminal) = self.terminals.get_mut(&terminal_id) {
+            terminal.mark_activity();
+        }
+    }
+
+    /// Whether a pane has been quiet long enough to render as stale.
+    ///
+    /// The focused pane is never stale: fading what you are actively reading
+    /// would trade legibility for a signal you do not need while looking at it.
+    pub(crate) fn pane_is_stale(
+        &self,
+        ws: &crate::workspace::Workspace,
+        pane_id: crate::layout::PaneId,
+        focused: bool,
+    ) -> bool {
+        if focused {
+            return false;
+        }
+        let Some(threshold) = self.pane_stale_after else {
+            return false;
+        };
+        ws.pane_state(pane_id)
+            .and_then(|pane| self.terminals.get(&pane.attached_terminal_id))
+            .is_some_and(|terminal| terminal.idle_for() >= threshold)
+    }
+
     pub(crate) fn mark_active_tab_seen(&mut self) -> bool {
         let Some(ws_idx) = self.active else {
             return false;

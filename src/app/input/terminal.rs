@@ -41,6 +41,9 @@ impl App {
         let Some(input) = self.prepare_terminal_key_forward(key) else {
             return;
         };
+        // A keystroke that actually reaches the pane counts as activity; the
+        // paths above intercept herdr's own bindings and return early.
+        self.state.mark_pane_activity(input.ws_idx, input.pane_id);
         if let Some(runtime) = self.lookup_runtime_sender(input.ws_idx, input.pane_id) {
             let _ = runtime.try_send_bytes(input.bytes);
         }
@@ -246,6 +249,9 @@ impl App {
         let Some(input) = self.prepare_terminal_key_forward(key) else {
             return;
         };
+        // A keystroke that actually reaches the pane counts as activity; the
+        // paths above intercept herdr's own bindings and return early.
+        self.state.mark_pane_activity(input.ws_idx, input.pane_id);
         if let Some(runtime) = self.lookup_runtime_sender(input.ws_idx, input.pane_id) {
             let _ = runtime.send_bytes(input.bytes).await;
         }
