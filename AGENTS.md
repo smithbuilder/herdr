@@ -93,7 +93,11 @@ Run `just check` before committing unless Can explicitly accepts narrower valida
 
 `cargo test` is not a substitute for `just test` when nextest is unavailable, in two directions. Nextest runs each test in its own process, so tests sharing process-global state (the agent manifest cache and its reload lock) can interfere under `cargo test`'s threads and fail in ways nextest never shows — one panic there poisons the lock and cascades into a dozen unrelated `PoisonError` failures. `cargo test --bin herdr` also skips the `tests/` integration suite entirely. If you must fall back, run `cargo test --bin herdr -- --test-threads=1` and say which suites you did not run.
 
-When pre-existing failures are suspected, prove it rather than asserting it: stash the change, run the same filter at `HEAD`, compare the failing set, then restore. Report new failures against that baseline, not against green.
+When pre-existing failures are suspected, prove it rather than asserting it: stash the change, run the same filter at `HEAD`, compare the failing set, then restore. Report new failures against that baseline, not against green. Then keep going — "pre-existing" is not the same as "not fixable", and the cause may still be cheap to fix.
+
+Agents usually run the suite from inside a Herdr pane, which exports `HERDR_STARTUP_CWD`, `HERDR_SOCKET_PATH`, `HERDR_ENV`, `HERDR_PANE_ID`, `HERDR_TAB_ID`, and `HERDR_WORKSPACE_ID`. Integration tests spawn real servers, so anything not cleared is inherited by the server under test. `HERDR_STARTUP_CWD` is the sharp one: the server seeds a startup workspace from it, which shifts workspace and pane numbering out from under ID assertions and leaves an extra pane holding a pty master fd. Suspect inherited `HERDR_*` before suspecting the code, and confirm with a straight A/B (`env -u <VAR> cargo nextest run -E 'test(<name>)'`).
+
+Every spawn helper in `tests/` that can start a server must clear those variables. A blanket `cmd.env_remove(...)` edit silently misses helpers that *set* a variable rather than remove it, so check each helper individually. Verify a hermeticity fix in **both** directions — with the variable set and unset. Passing only under `env -u` means the test is still fragile.
 
 Unit tests live next to the code (`#[cfg(test)] mod tests`). New `AppState` or `Workspace` behavior should be testable with `AppState::test_new()` and `Workspace::test_new()` without PTYs.
 
