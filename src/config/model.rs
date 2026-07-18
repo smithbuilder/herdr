@@ -808,6 +808,12 @@ pub struct UiConfig {
     pub pane_gaps: bool,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
+    /// Focused pane border color. Accepts hex (#89b4fa), named colors, or rgb(r,g,b).
+    /// Unset falls back to the theme accent.
+    pub pane_border_focused: Option<String>,
+    /// Unfocused pane border color. Same formats as `pane_border_focused`.
+    /// Unset falls back to the theme's dim overlay color.
+    pub pane_border_unfocused: Option<String>,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
@@ -1006,6 +1012,8 @@ impl Default for UiConfig {
             pane_borders: true,
             pane_gaps: true,
             show_agent_labels_on_pane_borders: false,
+            pane_border_focused: None,
+            pane_border_unfocused: None,
             hide_tab_bar_when_single_tab: false,
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             sidebar: SidebarConfig::default(),

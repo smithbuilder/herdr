@@ -885,7 +885,7 @@ pub(crate) fn handle_context_menu_key(
         }
         KeyCode::Down => {
             if let Some(menu) = &mut state.context_menu {
-                menu.list.move_next(menu.items().len());
+                menu.list.move_next(menu.item_labels().len());
             }
         }
         KeyCode::Enter => {
@@ -1071,7 +1071,7 @@ impl App {
             }
             KeyCode::Down => {
                 if let Some(menu) = &mut self.state.context_menu {
-                    menu.list.move_next(menu.items().len());
+                    menu.list.move_next(menu.item_labels().len());
                 }
             }
             KeyCode::Enter => {
@@ -1085,6 +1085,7 @@ impl App {
     }
 
     pub(crate) fn apply_context_menu_action_via_api(&mut self, menu: ContextMenuState, idx: usize) {
+        let (menu_x, menu_y) = (menu.x, menu.y);
         let item = menu.items().get(idx).copied();
         match (menu.kind, item) {
             (ContextMenuKind::GitWorkspace { ws_idx, .. }, Some("New worktree")) => {
@@ -1205,6 +1206,74 @@ impl App {
             }
             (
                 ContextMenuKind::Pane {
+                    ws_idx,
+                    tab_idx,
+                    pane_id,
+                    ..
+                },
+                Some("Move to pane…"),
+            ) => {
+                // Step 1 → open the target picker listing the other panes.
+                let targets = self.move_pane_target_options(ws_idx, tab_idx, pane_id);
+                if targets.is_empty() {
+                    leave_modal(&mut self.state);
+                } else {
+                    self.state.context_menu = Some(ContextMenuState {
+                        kind: ContextMenuKind::MovePaneTarget {
+                            ws_idx,
+                            tab_idx,
+                            pane_id,
+                            targets,
+                        },
+                        x: menu_x,
+                        y: menu_y,
+                        list: MenuListState::new(0),
+                    });
+                    self.state.mode = Mode::ContextMenu;
+                }
+            }
+            (
+                ContextMenuKind::MovePaneTarget {
+                    ws_idx,
+                    tab_idx,
+                    pane_id,
+                    targets,
+                },
+                _,
+            ) => {
+                // Step 2 → a target pane was chosen; open the direction picker.
+                if let Some(&(target_pane_id, _)) = targets.get(idx) {
+                    self.state.context_menu = Some(ContextMenuState {
+                        kind: ContextMenuKind::MovePaneDirection {
+                            ws_idx,
+                            tab_idx,
+                            pane_id,
+                            target_pane_id,
+                        },
+                        x: menu_x,
+                        y: menu_y,
+                        list: MenuListState::new(0),
+                    });
+                    self.state.mode = Mode::ContextMenu;
+                } else {
+                    leave_modal(&mut self.state);
+                }
+            }
+            (
+                ContextMenuKind::MovePaneDirection {
+                    ws_idx,
+                    tab_idx,
+                    pane_id,
+                    target_pane_id,
+                },
+                Some(direction),
+            ) => {
+                // Step 3 → a side was chosen; run the move.
+                self.apply_menu_pane_move(ws_idx, tab_idx, pane_id, target_pane_id, direction);
+                self.state.mode = Mode::Terminal;
+            }
+            (
+                ContextMenuKind::Pane {
                     ws_idx, pane_id, ..
                 },
                 Some("Split right"),
@@ -1249,6 +1318,96 @@ impl App {
                 }
             }
             _ => leave_modal(&mut self.state),
+        }
+    }
+
+    /// The other panes in this tab as (id, label) options for the move-target
+    /// picker. Label prefers the pane's project (cwd), then its title/agent,
+    /// and marks the currently focused pane.
+    fn move_pane_target_options(
+        &self,
+        ws_idx: usize,
+        tab_idx: usize,
+        source: crate::layout::PaneId,
+    ) -> Vec<(crate::layout::PaneId, String)> {
+        let Some(ws) = self.state.workspaces.get(ws_idx) else {
+            return Vec::new();
+        };
+        let Some(tab) = ws.tabs.get(tab_idx) else {
+            return Vec::new();
+        };
+        let focused = ws.focused_pane_id();
+        tab.layout
+            .pane_ids()
+            .into_iter()
+            .filter(|id| *id != source)
+            .map(|id| {
+                let project = tab
+                    .cwd_for_pane(id, &self.state.terminals, &self.terminal_runtimes)
+                    .map(|cwd| crate::workspace::derive_label_from_cwd(&cwd));
+                let label = project
+                    .or_else(|| {
+                        ws.pane_state(id)
+                            .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
+                            .and_then(|terminal| terminal.border_label(true))
+                    })
+                    .unwrap_or_else(|| "pane".to_string());
+                let label = if Some(id) == focused {
+                    format!("{label} (current)")
+                } else {
+                    label
+                };
+                (id, label)
+            })
+            .collect()
+    }
+
+    /// Run a move-to-pane picker choice: place `moved` on the chosen side of
+    /// `target`. The layout only inserts a pane *after* a target, so "left"/"up"
+    /// are "right"/"down" followed by a swap that flips the two into order.
+    fn apply_menu_pane_move(
+        &mut self,
+        ws_idx: usize,
+        tab_idx: usize,
+        moved: crate::layout::PaneId,
+        target: crate::layout::PaneId,
+        direction: &str,
+    ) {
+        let (Some(moved_id), Some(target_id), Some(tab_id)) = (
+            self.public_pane_id(ws_idx, moved),
+            self.public_pane_id(ws_idx, target),
+            self.public_tab_id(ws_idx, tab_idx),
+        ) else {
+            return;
+        };
+        let split = if direction == "Move up" || direction == "Move down" {
+            crate::api::schema::SplitDirection::Down
+        } else {
+            crate::api::schema::SplitDirection::Right
+        };
+        self.runtime_pane_move(
+            "tui.pane.move_to",
+            crate::api::schema::PaneMoveParams {
+                pane_id: moved_id.clone(),
+                destination: crate::api::schema::PaneMoveDestination::Tab {
+                    tab_id,
+                    target_pane_id: Some(target_id.clone()),
+                    split,
+                    ratio: None,
+                },
+                focus: true,
+            },
+        );
+        if direction == "Move left" || direction == "Move up" {
+            self.runtime_pane_swap(
+                "tui.pane.move_reorder",
+                crate::api::schema::PaneSwapParams {
+                    pane_id: None,
+                    direction: None,
+                    source_pane_id: Some(moved_id),
+                    target_pane_id: Some(target_id),
+                },
+            );
         }
     }
 }
@@ -1954,6 +2113,7 @@ mod tests {
                 pane_id,
                 source_pane_id: None,
                 has_manual_label: false,
+                has_other_panes: false,
             },
             x: 0,
             y: 0,
@@ -1971,6 +2131,83 @@ mod tests {
         assert_eq!(state.selected, 0);
         assert_eq!(state.mode, Mode::ConfirmClose);
         assert_eq!(state.workspaces.len(), 2);
+    }
+
+    #[test]
+    fn pane_context_menu_offers_move_to_pane_only_with_other_panes() {
+        let state = state_with_workspaces(&["main"]);
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+
+        let with_others = ContextMenuState {
+            kind: ContextMenuKind::Pane {
+                ws_idx: 0,
+                tab_idx: 0,
+                pane_id,
+                source_pane_id: None,
+                has_manual_label: false,
+                has_other_panes: true,
+            },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert!(with_others.items().contains(&"Move to pane…"));
+
+        let alone = ContextMenuState {
+            kind: ContextMenuKind::Pane {
+                ws_idx: 0,
+                tab_idx: 0,
+                pane_id,
+                source_pane_id: None,
+                has_manual_label: false,
+                has_other_panes: false,
+            },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert!(!alone.items().contains(&"Move to pane…"));
+    }
+
+    #[test]
+    fn move_pane_direction_menu_lists_all_four_sides() {
+        let state = state_with_workspaces(&["main"]);
+        let a = state.workspaces[0].tabs[0].root_pane;
+        let menu = ContextMenuState {
+            kind: ContextMenuKind::MovePaneDirection {
+                ws_idx: 0,
+                tab_idx: 0,
+                pane_id: a,
+                target_pane_id: a,
+            },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        assert_eq!(
+            menu.item_labels(),
+            vec!["Move left", "Move right", "Move up", "Move down"]
+        );
+    }
+
+    #[test]
+    fn move_pane_target_menu_labels_come_from_targets() {
+        let state = state_with_workspaces(&["main"]);
+        let a = state.workspaces[0].tabs[0].root_pane;
+        let menu = ContextMenuState {
+            kind: ContextMenuKind::MovePaneTarget {
+                ws_idx: 0,
+                tab_idx: 0,
+                pane_id: a,
+                targets: vec![(a, "alpha".to_string()), (a, "beta (current)".to_string())],
+            },
+            x: 0,
+            y: 0,
+            list: MenuListState::new(0),
+        };
+        // Static items() is empty for the dynamic picker; labels come from targets.
+        assert!(menu.items().is_empty());
+        assert_eq!(menu.item_labels(), vec!["alpha", "beta (current)"]);
     }
 
     #[test]
@@ -2019,6 +2256,7 @@ mod tests {
                 pane_id,
                 source_pane_id: None,
                 has_manual_label: false,
+                has_other_panes: false,
             },
             x: 0,
             y: 0,

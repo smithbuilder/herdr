@@ -420,7 +420,7 @@ pub(super) fn render_popup_pane(
         .unwrap_or("popup");
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.palette.accent))
+        .border_style(Style::default().fg(app.pane_border_focused.unwrap_or(app.palette.accent)))
         .title(pane_border_title(title, outer.width, true).unwrap_or_default())
         .style(Style::default().bg(app.palette.panel_bg));
     frame.render_widget(Clear, outer);
@@ -473,9 +473,9 @@ fn render_pane_borders(
         let cell = &mut buf[(x, y)];
         cell.set_symbol(symbol);
         let color = if focused {
-            app.palette.accent
+            app.pane_border_focused.unwrap_or(app.palette.accent)
         } else {
-            app.palette.overlay0
+            app.pane_border_unfocused.unwrap_or(app.palette.overlay0)
         };
         cell.set_style(Style::default().fg(color));
     }
@@ -640,9 +640,9 @@ fn render_pane_border_titles(
             continue;
         }
         let color = if info.is_focused {
-            app.palette.accent
+            app.pane_border_focused.unwrap_or(app.palette.accent)
         } else {
-            app.palette.overlay0
+            app.pane_border_unfocused.unwrap_or(app.palette.overlay0)
         };
         let mut style = Style::default().fg(color);
         if info.is_focused {

@@ -132,6 +132,27 @@ name = "dracula"
     }
 
     #[test]
+    fn ui_pane_border_colors_parse_and_default_to_none() {
+        let toml = r##"
+[ui]
+pane_border_focused = "#ff0000"
+pane_border_unfocused = "gray"
+"##;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.pane_border_focused.as_deref(), Some("#ff0000"));
+        assert_eq!(config.ui.pane_border_unfocused.as_deref(), Some("gray"));
+        assert_eq!(
+            parse_color(config.ui.pane_border_focused.as_deref().unwrap()),
+            ratatui::style::Color::Rgb(0xff, 0x00, 0x00)
+        );
+
+        // Unset falls back to the theme palette at render time.
+        let empty: Config = toml::from_str("").unwrap();
+        assert!(empty.ui.pane_border_focused.is_none());
+        assert!(empty.ui.pane_border_unfocused.is_none());
+    }
+
+    #[test]
     fn parse_color_accepts_reset_aliases() {
         use ratatui::style::Color;
 

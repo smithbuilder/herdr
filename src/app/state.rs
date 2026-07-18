@@ -1172,6 +1172,21 @@ pub enum ContextMenuKind {
         pane_id: PaneId,
         source_pane_id: Option<PaneId>,
         has_manual_label: bool,
+        has_other_panes: bool,
+    },
+    /// Step 2 of "Move to pane…": choose which pane to move next to.
+    MovePaneTarget {
+        ws_idx: usize,
+        tab_idx: usize,
+        pane_id: PaneId,
+        targets: Vec<(PaneId, String)>,
+    },
+    /// Step 3 of "Move to pane…": choose which side of the chosen target.
+    MovePaneDirection {
+        ws_idx: usize,
+        tab_idx: usize,
+        pane_id: PaneId,
+        target_pane_id: PaneId,
     },
 }
 
@@ -1184,24 +1199,26 @@ pub struct ContextMenuState {
 }
 
 impl ContextMenuState {
-    pub fn items(&self) -> &'static [&'static str] {
-        match self.kind {
-            ContextMenuKind::Workspace { .. } => &["Rename", "Close"],
+    /// Static item labels for a menu step. Dynamic steps (the move-target
+    /// picker) return an empty slice here and supply labels via `item_labels`.
+    pub fn items(&self) -> Vec<&'static str> {
+        match &self.kind {
+            ContextMenuKind::Workspace { .. } => vec!["Rename", "Close"],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: false,
                 ..
-            } => &["Rename", "Close", "New worktree", "Open worktree..."],
+            } => vec!["Rename", "Close", "New worktree", "Open worktree..."],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: true,
                 ..
-            } => &["Rename", "Close", "Delete worktree checkout..."],
+            } => vec!["Rename", "Close", "Delete worktree checkout..."],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: true,
                 collapsed: true,
                 ..
-            } => &[
+            } => vec![
                 "Rename",
                 "Close group",
                 "New worktree",
@@ -1213,62 +1230,55 @@ impl ContextMenuState {
                 has_worktree_children: true,
                 collapsed: false,
                 ..
-            } => &[
+            } => vec![
                 "Rename",
                 "Close group",
                 "New worktree",
                 "Open worktree...",
                 "Collapse",
             ],
-            ContextMenuKind::Tab { .. } => &["New tab", "Rename", "Close"],
+            ContextMenuKind::Tab { .. } => vec!["New tab", "Rename", "Close"],
             ContextMenuKind::Pane {
-                has_manual_label: true,
-                source_pane_id: Some(_),
+                has_manual_label,
+                source_pane_id,
+                has_other_panes,
                 ..
-            } => &[
-                "Rename pane",
-                "Clear pane name",
-                "Swap with focused pane",
-                "Split right",
-                "Split down",
-                "Zoom",
-                "Close pane",
-            ],
-            ContextMenuKind::Pane {
-                has_manual_label: false,
-                source_pane_id: Some(_),
-                ..
-            } => &[
-                "Rename pane",
-                "Swap with focused pane",
-                "Split right",
-                "Split down",
-                "Zoom",
-                "Close pane",
-            ],
-            ContextMenuKind::Pane {
-                has_manual_label: true,
-                source_pane_id: None,
-                ..
-            } => &[
-                "Rename pane",
-                "Clear pane name",
-                "Split right",
-                "Split down",
-                "Zoom",
-                "Close pane",
-            ],
-            ContextMenuKind::Pane {
-                has_manual_label: false,
-                source_pane_id: None,
-                ..
-            } => &[
-                "Rename pane",
-                "Split right",
-                "Split down",
-                "Zoom",
-                "Close pane",
-            ],
+            } => {
+                let mut items = vec!["Rename pane"];
+                if *has_manual_label {
+                    items.push("Clear pane name");
+                }
+                if source_pane_id.is_some() {
+                    items.push("Swap with focused pane");
+                }
+                if *has_other_panes {
+                    items.push("Move to pane…");
+                }
+                items.push("Split right");
+                items.push("Split down");
+                items.push("Zoom");
+                items.push("Close pane");
+                items
+            }
+            ContextMenuKind::MovePaneTarget { .. } => Vec::new(),
+            ContextMenuKind::MovePaneDirection { .. } => {
+                vec!["Move left", "Move right", "Move up", "Move down"]
+            }
+        }
+    }
+
+    /// Rendered item labels, including the dynamic pane list for the
+    /// move-target picker.
+    pub fn item_labels(&self) -> Vec<String> {
+        match &self.kind {
+            ContextMenuKind::MovePaneTarget { targets, .. } => {
+                targets.iter().map(|(_, label)| label.clone()).collect()
+            }
+            _ => self
+                .items()
+                .iter()
+                .map(|item| (*item).to_string())
+                .collect(),
         }
     }
 }
@@ -1464,6 +1474,10 @@ pub struct AppState {
     pub pane_borders: bool,
     pub pane_gaps: bool,
     pub show_agent_labels_on_pane_borders: bool,
+    /// Focused pane border color override; falls back to `palette.accent` when None.
+    pub pane_border_focused: Option<ratatui::style::Color>,
+    /// Unfocused pane border color override; falls back to `palette.overlay0` when None.
+    pub pane_border_unfocused: Option<ratatui::style::Color>,
     pub hide_tab_bar_when_single_tab: bool,
     pub pane_history_persistence: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
@@ -1837,6 +1851,8 @@ impl AppState {
             pane_borders: true,
             pane_gaps: false,
             show_agent_labels_on_pane_borders: false,
+            pane_border_focused: None,
+            pane_border_unfocused: None,
             hide_tab_bar_when_single_tab: false,
             pane_history_persistence: false,
             reveal_hidden_cursor_for_cjk_ime: false,
@@ -2223,6 +2239,29 @@ impl AppState {
                     if let Some(source_pane_id) = source_pane_id {
                         assert_live_pane(source_pane_id, "context menu source pane");
                     }
+                }
+                ContextMenuKind::MovePaneTarget {
+                    ws_idx,
+                    tab_idx,
+                    pane_id,
+                    ..
+                }
+                | ContextMenuKind::MovePaneDirection {
+                    ws_idx,
+                    tab_idx,
+                    pane_id,
+                    ..
+                } => {
+                    assert_tab_index(ws_idx, tab_idx, "context menu move pane tab");
+                    assert!(
+                        self.workspaces[ws_idx].tabs[tab_idx]
+                            .panes
+                            .contains_key(&pane_id),
+                        "context menu move references pane {:?} outside workspace {} tab {}",
+                        pane_id,
+                        ws_idx,
+                        tab_idx
+                    );
                 }
             }
         }

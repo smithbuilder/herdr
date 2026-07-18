@@ -659,6 +659,18 @@
           "description": "Show agent labels in split pane borders when no manual pane label is set."
         },
         {
+          "key": "ui.pane_border_focused",
+          "type": "string",
+          "default": "(theme accent)",
+          "description": "Color of the focused pane's border. Accepts hex (#89b4fa), named colors, or rgb(r,g,b). Unset falls back to the theme accent."
+        },
+        {
+          "key": "ui.pane_border_unfocused",
+          "type": "string",
+          "default": "(theme overlay)",
+          "description": "Color of unfocused panes' borders. Same formats as pane_border_focused. Unset falls back to the theme's dim overlay color."
+        },
+        {
           "key": "ui.hide_tab_bar_when_single_tab",
           "type": "boolean",
           "default": "false",
