@@ -91,6 +91,10 @@ just check              # formatting check + cargo nextest + maintenance script 
 
 Run `just check` before committing unless Can explicitly accepts narrower validation. Do not bypass failing checks; fix the failure or explain exactly why a narrower check is enough.
 
+`cargo test` is not a substitute for `just test` when nextest is unavailable, in two directions. Nextest runs each test in its own process, so tests sharing process-global state (the agent manifest cache and its reload lock) can interfere under `cargo test`'s threads and fail in ways nextest never shows — one panic there poisons the lock and cascades into a dozen unrelated `PoisonError` failures. `cargo test --bin herdr` also skips the `tests/` integration suite entirely. If you must fall back, run `cargo test --bin herdr -- --test-threads=1` and say which suites you did not run.
+
+When pre-existing failures are suspected, prove it rather than asserting it: stash the change, run the same filter at `HEAD`, compare the failing set, then restore. Report new failures against that baseline, not against green.
+
 Unit tests live next to the code (`#[cfg(test)] mod tests`). New `AppState` or `Workspace` behavior should be testable with `AppState::test_new()` and `Workspace::test_new()` without PTYs.
 
 For broad refactors or release-risk regressions, classify the risk before editing. Treat changes as refactor-risk when they touch two or more core surfaces, persisted state, protocol/API IDs, workspace/tab/pane identity, restore/handoff, agent detection authority, or UI/input state projection. Before moving code, identify the protected behavior and add or name characterization tests. Identity/state refactors should use the test-only invariants `AppState::assert_invariants_for_test()` or `Workspace::assert_invariants_for_test()` with adversarial state from `AppState::test_with_adversarial_identity_state()` or `Workspace::test_adversarial_identity_state()`. Run a roundtable for broad refactors and release-risk regressions, not for routine local fixes.
@@ -137,6 +141,17 @@ manual testing, reset `C:\work\repo` back to a clean checkout before finishing.
 Agent detection changes should use the manifest hot-reload loop. Can drives the real agent UI into the target state, then you read the pane with `herdr agent read <pane> --source detection --format text` and inspect matching with `herdr agent explain <pane> --json`. Update the bundled manifest in `src/detect/manifests/<agent>.toml`, copy that manifest to the local override path at `~/.config/herdr/agent-detection/<agent>.toml`, then run `herdr server reload-agent-manifests`. Can verifies the live pane state, and once the rule is correct, remove the local override so the committed bundled manifest remains the source of truth.
 
 Do not add large agent-specific full-screen fixture suites for routine manifest tuning. Keep Rust tests focused on manifest parsing, rule semantics, skip-state semantics, source precedence, cache reload behavior, and update flow. Use live pane reads for agent-specific screen evidence.
+
+Adding a *new* agent is more than a manifest. A pane only classifies once the agent has an identity, so all of these must land together, and the compiler only catches some of them:
+
+- `src/detect/mod.rs`: `Agent` enum variant, `SCREEN_MANIFEST_AGENTS` (fixed-size array, bump the count), `agent_label`, and `lookup_agent` aliases.
+- `src/config/sound.rs`: `AgentSoundOverrides::for_agent` match arm. Agents without a dedicated sound key return `AgentSoundSetting::Default`.
+- `src/detect/manifest.rs`: `BUNDLED_MANIFESTS` entry, keyed by the agent *label* (`agy`, not `antigravity`).
+- `src/detect/manifests/<agent>.toml` **and** `website/agent-detection/<agent>.toml` plus an `index.toml` entry. The manifest check fails with "missing bundled agent(s)" when the website catalog omits a bundled manifest, and the two files must be byte-identical at the same version.
+
+Agents launched through an interpreter (`node /path/to/qwen`) resolve via `wrapped_agent_name_from_runtime_argv`, so the wrapper script's basename is the name to add to `lookup_agent`. Confirm with `herdr pane process-info --pane <id>` rather than guessing.
+
+Write manifest gates so they survive narrow panes. Agent chrome degrades in two different ways at small widths: some agents hard-wrap a footer mid-phrase (`"Enter to"` / `"send · Ctrl"` / `"+J newline"`), so phrase-literal `contains` silently stops matching and interword `\s*` regexes are required; others ellipsis-truncate a fixed footer (`"Auto mode (shift + tab to cycle)"` becomes `"Auto m…"`), which no pattern can recover. Check `region_preview` and `region_bytes` in `herdr agent explain` output — a rule reporting `matched: false` alongside `fallback_reason: "default_known_agent_idle_fallback"` is usually a width problem, not a wrong gate.
 
 ## Vendored libghostty-vt
 
