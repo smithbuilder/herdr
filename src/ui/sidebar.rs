@@ -16,6 +16,7 @@ use crate::app::state::{AgentPanelSort, Palette};
 use crate::app::{AppState, Mode};
 use crate::detect::AgentState;
 use crate::terminal::TerminalRuntimeRegistry;
+use crate::workspace::derive_label_from_cwd;
 
 const WORKSPACE_SECTION_HEADER_ROWS: u16 = 2;
 const AGENT_PANEL_HEADER_ROWS: u16 = 3;
@@ -25,6 +26,10 @@ pub(crate) struct AgentPanelEntry {
     pub tab_idx: usize,
     pub pane_id: crate::layout::PaneId,
     pub primary_label: String,
+    /// Per-pane project name derived from the pane's own working directory.
+    /// Lets a single workspace that hosts panes in different repos show each
+    /// pane's project, where `primary_label` (the workspace name) is shared.
+    pub project: Option<String>,
     pub primary_tab_label: Option<String>,
     pub pane_label: Option<String>,
     pub terminal_title: Option<String>,
@@ -143,6 +148,13 @@ fn agent_panel_entries_with_runtimes(
                         tab_idx: detail.tab_idx,
                         pane_id: detail.pane_id,
                         primary_label: workspace_label.clone(),
+                        project: ws
+                            .tabs
+                            .get(detail.tab_idx)
+                            .and_then(|tab| {
+                                tab.cwd_for_pane(detail.pane_id, &app.terminals, terminal_runtimes)
+                            })
+                            .map(|cwd| derive_label_from_cwd(&cwd)),
                         primary_tab_label: show_tab.then_some(detail.tab_label),
                         pane_label: detail.pane_label,
                         terminal_title: detail.terminal_title,
@@ -920,6 +932,7 @@ fn resolved_token_spans(
         .map(|token| match &token.kind {
             ResolvedTokenKind::StateText(text)
             | ResolvedTokenKind::Workspace(text)
+            | ResolvedTokenKind::Project(text)
             | ResolvedTokenKind::Tab(text)
             | ResolvedTokenKind::Pane(text)
             | ResolvedTokenKind::Agent(text)
@@ -1032,6 +1045,7 @@ fn resolved_token_spans(
             ResolvedTokenKind::Tab(text)
             | ResolvedTokenKind::Pane(text)
             | ResolvedTokenKind::Agent(text)
+            | ResolvedTokenKind::Project(text)
             | ResolvedTokenKind::Branch(text) => {
                 spans.push(Span::styled(
                     truncate_end(text, budgets[index]),

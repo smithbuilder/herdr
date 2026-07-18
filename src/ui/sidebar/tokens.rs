@@ -15,6 +15,7 @@ pub(super) enum ResolvedTokenKind {
     StateIcon,
     StateText(String),
     Workspace(String),
+    Project(String),
     Tab(String),
     Pane(String),
     Agent(String),
@@ -55,6 +56,9 @@ pub(super) fn agent_rows(
                         }
                         AgentSidebarToken::Workspace => {
                             Some(ResolvedTokenKind::Workspace(entry.primary_label.clone()))
+                        }
+                        AgentSidebarToken::Project => {
+                            entry.project.clone().map(ResolvedTokenKind::Project)
                         }
                         AgentSidebarToken::Tab => {
                             entry.primary_tab_label.clone().map(ResolvedTokenKind::Tab)
@@ -163,6 +167,7 @@ mod tests {
             tab_idx: 0,
             pane_id: crate::layout::PaneId::from_raw(1),
             primary_label: "repo".into(),
+            project: Some("myproject".into()),
             primary_tab_label: None,
             pane_label: None,
             terminal_title: None,
@@ -254,6 +259,35 @@ mod tests {
                 ResolvedToken::unstyled(ResolvedTokenKind::TerminalTitle("raw title".into())),
                 ResolvedToken::unstyled(ResolvedTokenKind::Custom("custom title".into())),
             ]]
+        );
+    }
+
+    #[test]
+    fn project_token_resolves_per_pane_and_elides_when_absent() {
+        let config = AgentsSidebarConfig {
+            rows: vec![
+                vec![AgentSidebarToken::StateIcon, AgentSidebarToken::Project],
+                vec![AgentSidebarToken::Agent],
+            ],
+            ..Default::default()
+        };
+
+        // entry() sets project = Some("myproject").
+        assert_eq!(
+            agent_rows(&config, &entry(), "working")[0],
+            vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::StateIcon),
+                ResolvedToken::unstyled(ResolvedTokenKind::Project("myproject".into())),
+            ]
+        );
+
+        // Without a resolvable cwd, the project token elides so the row does not
+        // render an empty slot.
+        let mut no_project = entry();
+        no_project.project = None;
+        assert_eq!(
+            agent_rows(&config, &no_project, "working")[0],
+            vec![ResolvedToken::unstyled(ResolvedTokenKind::StateIcon)]
         );
     }
 

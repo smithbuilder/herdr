@@ -105,6 +105,11 @@ pub enum AgentSidebarToken {
     StateIcon,
     StateText,
     Workspace,
+    /// Project name derived from the pane's own working directory (git repo
+    /// root folder, falling back to the cwd basename). Distinguishes panes that
+    /// live in different projects inside a single workspace, where `workspace`
+    /// would read the same for every pane.
+    Project,
     Tab,
     Pane,
     Agent,
@@ -235,6 +240,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::StateIcon => "state_icon".into(),
         AgentSidebarToken::StateText => "state_text".into(),
         AgentSidebarToken::Workspace => "workspace".into(),
+        AgentSidebarToken::Project => "project".into(),
         AgentSidebarToken::Tab => "tab".into(),
         AgentSidebarToken::Pane => "pane".into(),
         AgentSidebarToken::Agent => "agent".into(),
@@ -289,6 +295,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("state_icon", Self::StateIcon),
                 ("state_text", Self::StateText),
                 ("workspace", Self::Workspace),
+                ("project", Self::Project),
                 ("tab", Self::Tab),
                 ("pane", Self::Pane),
                 ("agent", Self::Agent),
@@ -511,6 +518,26 @@ row_gap = 3
             vec![SpaceSidebarToken::Custom("jj_status".into())]
         );
         assert_eq!(config.ui.sidebar.spaces.row_gap, 3);
+    }
+
+    #[test]
+    fn parses_project_token_for_agents() {
+        let config: crate::config::Config = toml::from_str(
+            r##"
+[ui.sidebar.agents]
+rows = [["state_icon", { token = "project", bold = true, fg = "#00ffff" }], ["agent"]]
+"##,
+        )
+        .expect("project token config");
+
+        let (token, style) = config.ui.sidebar.agents.rows[0][1].parts();
+        assert_eq!(token, &AgentSidebarToken::Project);
+        assert_eq!(style.bold, Some(true));
+        assert_eq!(
+            style.fg.unwrap().ratatui(),
+            ratatui::style::Color::Rgb(0x00, 0xff, 0xff)
+        );
+        assert_eq!(agent_token_name(&AgentSidebarToken::Project), "project");
     }
 
     #[test]
