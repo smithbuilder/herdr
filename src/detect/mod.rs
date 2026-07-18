@@ -67,6 +67,33 @@ pub enum Agent {
 }
 
 impl Agent {
+    #[cfg(test)]
+    pub const ALL: [Self; 23] = [
+        Self::Pi,
+        Self::Claude,
+        Self::Codex,
+        Self::Gemini,
+        Self::Cursor,
+        Self::Devin,
+        Self::Antigravity,
+        Self::Cline,
+        Self::Omp,
+        Self::Mastracode,
+        Self::OpenCode,
+        Self::GithubCopilot,
+        Self::Kimi,
+        Self::Kiro,
+        Self::Droid,
+        Self::Amp,
+        Self::Grok,
+        Self::Hermes,
+        Self::Kilo,
+        Self::Qodercli,
+        Self::Maki,
+        Self::Goose,
+        Self::Qwen,
+    ];
+
     pub const SCREEN_MANIFEST_AGENTS: [Self; 21] = [
         Self::Pi,
         Self::Claude,
@@ -116,6 +143,35 @@ pub fn agent_label(agent: Agent) -> &'static str {
         Agent::Qodercli => "qodercli",
         Agent::Maki => "maki",
         Agent::Goose => "goose",
+        Agent::Qwen => "qwen",
+    }
+}
+
+pub fn interactive_agent_executable(agent: Agent) -> &'static str {
+    match agent {
+        Agent::Pi => "pi",
+        Agent::Claude => "claude",
+        Agent::Codex => "codex",
+        Agent::Gemini => "gemini",
+        Agent::Cursor => "cursor-agent",
+        Agent::Devin => "devin",
+        Agent::Antigravity => "agy",
+        Agent::Cline => "cline",
+        Agent::Omp => "omp",
+        Agent::Mastracode => "mastracode",
+        Agent::OpenCode => "opencode",
+        Agent::GithubCopilot => "copilot",
+        Agent::Kimi => "kimi",
+        Agent::Kiro => "kiro-cli",
+        Agent::Droid => "droid",
+        Agent::Amp => "amp",
+        Agent::Grok => "grok",
+        Agent::Hermes => "hermes",
+        Agent::Kilo => "kilo",
+        Agent::Qodercli => "qodercli",
+        Agent::Maki => "maki",
+        Agent::Goose => "goose",
+        // qwen-code installs a `qwen` wrapper that execs node against its cli.js.
         Agent::Qwen => "qwen",
     }
 }
@@ -670,34 +726,43 @@ mod tests {
 
     #[test]
     fn every_agent_label_round_trips_through_canonical_and_alias_parsers() {
-        let agents = [
-            Agent::Pi,
-            Agent::Claude,
-            Agent::Codex,
-            Agent::Gemini,
-            Agent::Cursor,
-            Agent::Devin,
-            Agent::Antigravity,
-            Agent::Cline,
-            Agent::Omp,
-            Agent::Mastracode,
-            Agent::OpenCode,
-            Agent::GithubCopilot,
-            Agent::Kimi,
-            Agent::Kiro,
-            Agent::Droid,
-            Agent::Amp,
-            Agent::Grok,
-            Agent::Hermes,
-            Agent::Kilo,
-            Agent::Qodercli,
-            Agent::Maki,
-        ];
-
-        for agent in agents {
+        for agent in Agent::ALL {
             let label = agent_label(agent);
             assert_eq!(parse_canonical_agent_label(label), Some(agent));
             assert_eq!(parse_agent_label(label), Some(agent));
+        }
+    }
+
+    #[test]
+    fn every_agent_has_a_canonical_interactive_executable() {
+        let expected = [
+            (Agent::Pi, "pi"),
+            (Agent::Claude, "claude"),
+            (Agent::Codex, "codex"),
+            (Agent::Gemini, "gemini"),
+            (Agent::Cursor, "cursor-agent"),
+            (Agent::Devin, "devin"),
+            (Agent::Antigravity, "agy"),
+            (Agent::Cline, "cline"),
+            (Agent::Omp, "omp"),
+            (Agent::Mastracode, "mastracode"),
+            (Agent::OpenCode, "opencode"),
+            (Agent::GithubCopilot, "copilot"),
+            (Agent::Kimi, "kimi"),
+            (Agent::Kiro, "kiro-cli"),
+            (Agent::Droid, "droid"),
+            (Agent::Amp, "amp"),
+            (Agent::Grok, "grok"),
+            (Agent::Hermes, "hermes"),
+            (Agent::Kilo, "kilo"),
+            (Agent::Qodercli, "qodercli"),
+            (Agent::Maki, "maki"),
+            (Agent::Goose, "goose"),
+            (Agent::Qwen, "qwen"),
+        ];
+        assert_eq!(expected.len(), Agent::ALL.len());
+        for (agent, executable) in expected {
+            assert_eq!(interactive_agent_executable(agent), executable);
         }
     }
 
